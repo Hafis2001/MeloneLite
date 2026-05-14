@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "MeloneLite",
+    "slug": "MeloneLite",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/appicon.jpeg",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/appicon.jpeg",
+      "resizeMode": "contain",
+      "backgroundColor": "#0D0D0D"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.melonelite.restaurant"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/appicon.jpeg",
+        "backgroundColor": "#0D0D0D"
+      },
+      "package": "com.melonelite.restaurant",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.CAMERA",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.READ_PHONE_STATE",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "melonelite",
+    "plugins": [
+      "expo-sqlite",
+      "expo-font",
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow MeloneLite to access your photos for item images.",
+          "cameraPermission": "Allow MeloneLite to use camera to capture item images."
+        }
+      ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "8a8619da-a29d-485e-af17-27a7792362ef"
+      }
+    }
+  }
+}
