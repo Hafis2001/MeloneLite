@@ -90,6 +90,14 @@ export default function RootLayout() {
             }}
           />
           <Stack.Screen
+            name="menu-scanner"
+            options={{
+              headerShown: false,
+              presentation: 'modal',
+              animation: 'slide_from_bottom',
+            }}
+          />
+          <Stack.Screen
             name="order-detail"
             options={{
               headerShown: false,

@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCart } from '../src/context/CartContext';
 import { placeOrder } from '../src/db/ordersDB';
 import { getSetting } from '../src/db/settingsDB';
+import { formatCurrency } from '../src/utils/currencyUtils';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../src/constants/theme';
 
 const PAYMENT_METHODS = ['Cash', 'Card', 'UPI', 'Wallet'];
@@ -17,10 +18,13 @@ export default function CartScreen() {
   const {
     state, removeItem, updateQuantity, clearCart,
     setCustomerName, setTableNo, setPaymentMethod, setNotes, setDiscount,
+    setSplitPayment, setCashAmount, setUpiAmount,
     getSubtotal,
   } = useCart();
 
+  const { getTotalItems } = useCart();
   const [placing, setPlacing] = useState(false);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
 
   const subtotal = getSubtotal();
   const discountAmt = Math.max(0, Math.min(state.discount, subtotal));
@@ -50,13 +54,16 @@ export default function CartScreen() {
           tax_amount: 0,
           discount: discountAmt,
           grand_total: grandTotal,
-          payment_method: state.paymentMethod,
+          payment_method: state.isSplitPayment ? 'Split' : state.paymentMethod,
           notes: state.notes,
+          is_split_payment: state.isSplitPayment ? 1 : 0,
+          cash_amount: state.isSplitPayment ? state.cashAmount : (state.paymentMethod === 'Cash' ? grandTotal : 0),
+          upi_amount: state.isSplitPayment ? state.upiAmount : (state.paymentMethod === 'UPI' ? grandTotal : 0),
         },
         orderItems
       );
       clearCart();
-      Alert.alert('Order Placed! 🎉', `Grand Total: ₹${grandTotal.toFixed(2)}`, [
+      Alert.alert('Order Placed! 🎉', `Grand Total: ${formatCurrency(grandTotal)}`, [
         { text: 'View Orders', onPress: () => { router.dismiss(); router.push('/(tabs)/orders'); } },
         { text: 'OK', onPress: () => router.dismiss() },
       ]);
@@ -70,7 +77,8 @@ export default function CartScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        {/* Header */}
+        <View style={styles.contentWrapper}>
+          {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backBtn} onPress={() => router.dismiss()}>
             <MaterialCommunityIcons name="chevron-down" size={26} color={Colors.textPrimary} />
@@ -103,7 +111,7 @@ export default function CartScreen() {
                   <View key={ci.item.id} style={styles.cartItem}>
                     <View style={styles.cartItemInfo}>
                       <Text style={styles.cartItemName} numberOfLines={1}>{ci.item.item_name}</Text>
-                      <Text style={styles.cartItemRate}>₹{ci.item.rate.toFixed(2)} each</Text>
+                      <Text style={styles.cartItemRate}>{formatCurrency(ci.item.rate)} each</Text>
                     </View>
                     <View style={styles.qtyControls}>
                       <TouchableOpacity style={styles.qtyBtn}
@@ -116,7 +124,7 @@ export default function CartScreen() {
                         <MaterialCommunityIcons name="plus" size={14} color={Colors.gold} />
                       </TouchableOpacity>
                     </View>
-                    <Text style={styles.cartItemSubtotal}>₹{(ci.item.rate * ci.quantity).toFixed(2)}</Text>
+                    <Text style={styles.cartItemSubtotal}>{formatCurrency(ci.item.rate * ci.quantity)}</Text>
                     <TouchableOpacity onPress={() => removeItem(ci.item.id)} style={styles.removeBtn}>
                       <MaterialCommunityIcons name="close" size={16} color={Colors.textMuted} />
                     </TouchableOpacity>
@@ -126,68 +134,149 @@ export default function CartScreen() {
 
               {/* Customer Details */}
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Order Details</Text>
-                <View style={styles.inputGroup}>
-                  <MaterialCommunityIcons name="account-outline" size={18} color={Colors.gold} />
-                  <TextInput style={styles.input} placeholder="Customer Name (optional)"
-                    placeholderTextColor={Colors.textMuted} value={state.customerName}
-                    onChangeText={setCustomerName} />
-                </View>
-                <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
-                  <MaterialCommunityIcons name="table-chair" size={18} color={Colors.gold} />
-                  <TextInput style={styles.input} placeholder="Table No. (optional)"
-                    placeholderTextColor={Colors.textMuted} value={state.tableNo}
-                    onChangeText={setTableNo} keyboardType="numeric" />
-                </View>
-                <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
-                  <MaterialCommunityIcons name="tag-outline" size={18} color={Colors.gold} />
-                  <TextInput style={styles.input} placeholder="Discount amount"
-                    placeholderTextColor={Colors.textMuted}
-                    value={state.discount > 0 ? state.discount.toString() : ''}
-                    onChangeText={v => setDiscount(parseFloat(v) || 0)}
-                    keyboardType="decimal-pad" />
-                </View>
-                <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
-                  <MaterialCommunityIcons name="note-text-outline" size={18} color={Colors.gold} />
-                  <TextInput style={styles.input} placeholder="Notes (optional)"
-                    placeholderTextColor={Colors.textMuted} value={state.notes}
-                    onChangeText={setNotes} />
-                </View>
+                <TouchableOpacity 
+                  style={styles.collapsibleHeader} 
+                  onPress={() => setDetailsExpanded(!detailsExpanded)}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <MaterialCommunityIcons name="clipboard-text-outline" size={20} color={Colors.gold} />
+                    <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Order Details</Text>
+                  </View>
+                  <MaterialCommunityIcons 
+                    name={detailsExpanded ? 'chevron-up' : 'chevron-down'} 
+                    size={24} color={Colors.textMuted} 
+                  />
+                </TouchableOpacity>
+
+                {detailsExpanded ? (
+                  <View style={{ marginTop: Spacing.md }}>
+                    <View style={styles.inputGroup}>
+                      <MaterialCommunityIcons name="account-outline" size={18} color={Colors.gold} />
+                      <TextInput style={styles.input} placeholder="Customer Name (optional)"
+                        placeholderTextColor={Colors.textMuted} value={state.customerName}
+                        onChangeText={setCustomerName} />
+                    </View>
+                    <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
+                      <MaterialCommunityIcons name="table-chair" size={18} color={Colors.gold} />
+                      <TextInput style={styles.input} placeholder="Table No. (optional)"
+                        placeholderTextColor={Colors.textMuted} value={state.tableNo}
+                        onChangeText={setTableNo} keyboardType="numeric" />
+                    </View>
+                    <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
+                      <MaterialCommunityIcons name="tag-outline" size={18} color={Colors.gold} />
+                      <TextInput style={styles.input} placeholder="Discount amount"
+                        placeholderTextColor={Colors.textMuted}
+                        value={state.discount > 0 ? state.discount.toString() : ''}
+                        onChangeText={v => setDiscount(parseFloat(v) || 0)}
+                        keyboardType="decimal-pad" />
+                    </View>
+                    <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
+                      <MaterialCommunityIcons name="note-text-outline" size={18} color={Colors.gold} />
+                      <TextInput style={styles.input} placeholder="Notes (optional)"
+                        placeholderTextColor={Colors.textMuted} value={state.notes}
+                        onChangeText={setNotes} />
+                    </View>
+                  </View>
+                ) : (
+                  (state.customerName || state.tableNo || state.discount > 0) && (
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryText}>
+                        {state.customerName && `${state.customerName} • `}
+                        {state.tableNo && `Table ${state.tableNo} • `}
+                        {state.discount > 0 && `${formatCurrency(state.discount)} Off`}
+                      </Text>
+                    </View>
+                  )
+                )}
               </View>
 
               {/* Payment Method */}
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Payment Method</Text>
-                <View style={styles.paymentRow}>
-                  {PAYMENT_METHODS.map(method => (
-                    <TouchableOpacity key={method}
-                      style={[styles.paymentChip, state.paymentMethod === method && styles.paymentChipActive]}
-                      onPress={() => setPaymentMethod(method)}>
-                      <Text style={[styles.paymentChipText, state.paymentMethod === method && styles.paymentChipTextActive]}>
-                        {method}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                <View style={styles.paymentHeader}>
+                  <Text style={styles.sectionTitle}>Payment Method</Text>
+                  <TouchableOpacity 
+                    style={[styles.splitToggle, state.isSplitPayment && styles.splitToggleActive]}
+                    onPress={() => setSplitPayment(!state.isSplitPayment)}
+                  >
+                    <MaterialCommunityIcons 
+                      name={state.isSplitPayment ? "call-split" : "square-outline"} 
+                      size={18} color={state.isSplitPayment ? Colors.textInverse : Colors.gold} 
+                    />
+                    <Text style={[styles.splitToggleText, state.isSplitPayment && { color: Colors.textInverse }]}>
+                      Split
+                    </Text>
+                  </TouchableOpacity>
                 </View>
+
+                {state.isSplitPayment ? (
+                  <View style={styles.splitInputContainer}>
+                    <View style={styles.splitInputBox}>
+                      <Text style={styles.splitLabel}>Cash Amount</Text>
+                      <View style={styles.inputGroup}>
+                        <MaterialCommunityIcons name="cash" size={18} color={Colors.gold} />
+                        <TextInput 
+                          style={styles.input} 
+                          placeholder="0.00" 
+                          keyboardType="decimal-pad"
+                          value={state.cashAmount > 0 ? state.cashAmount.toString() : ''}
+                          onChangeText={v => {
+                            const val = parseFloat(v) || 0;
+                            setCashAmount(val);
+                            setUpiAmount(Math.max(0, grandTotal - val));
+                          }}
+                        />
+                      </View>
+                    </View>
+                    <View style={styles.splitInputBox}>
+                      <Text style={styles.splitLabel}>UPI Amount</Text>
+                      <View style={styles.inputGroup}>
+                        <MaterialCommunityIcons name="cellphone-nfc" size={18} color={Colors.gold} />
+                        <TextInput 
+                          style={styles.input} 
+                          placeholder="0.00" 
+                          keyboardType="decimal-pad"
+                          value={state.upiAmount > 0 ? state.upiAmount.toString() : ''}
+                          onChangeText={v => {
+                            const val = parseFloat(v) || 0;
+                            setUpiAmount(val);
+                            setCashAmount(Math.max(0, grandTotal - val));
+                          }}
+                        />
+                      </View>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.paymentRow}>
+                    {PAYMENT_METHODS.map(method => (
+                      <TouchableOpacity key={method}
+                        style={[styles.paymentChip, state.paymentMethod === method && styles.paymentChipActive]}
+                        onPress={() => setPaymentMethod(method)}>
+                        <Text style={[styles.paymentChipText, state.paymentMethod === method && styles.paymentChipTextActive]}>
+                          {method}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
               </View>
 
-              {/* Bill Summary */}
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Bill Summary</Text>
                 <View style={styles.billRow}>
                   <Text style={styles.billLabel}>Subtotal</Text>
-                  <Text style={styles.billValue}>₹{subtotal.toFixed(2)}</Text>
+                  <Text style={styles.billValue}>{formatCurrency(subtotal)}</Text>
                 </View>
                 {discountAmt > 0 && (
                   <View style={styles.billRow}>
                     <Text style={styles.billLabel}>Discount</Text>
-                    <Text style={[styles.billValue, { color: Colors.error }]}>- ₹{discountAmt.toFixed(2)}</Text>
+                    <Text style={[styles.billValue, { color: Colors.error }]}>- {formatCurrency(discountAmt)}</Text>
                   </View>
                 )}
 
                 <View style={[styles.billRow, styles.grandRow]}>
                   <Text style={styles.grandLabel}>Grand Total</Text>
-                  <Text style={styles.grandValue}>₹{grandTotal.toFixed(2)}</Text>
+                  <Text style={styles.grandValue}>{formatCurrency(grandTotal)}</Text>
                 </View>
               </View>
             </>
@@ -206,11 +295,12 @@ export default function CartScreen() {
             >
               <MaterialCommunityIcons name="check-circle-outline" size={22} color={Colors.textInverse} />
               <Text style={styles.placeOrderText}>
-                {placing ? 'Placing Order...' : `Place Order  •  ₹${grandTotal.toFixed(2)}`}
+                {placing ? 'Placing Order...' : `Place Order  •  ${formatCurrency(grandTotal)}`}
               </Text>
             </TouchableOpacity>
           </View>
         )}
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -218,6 +308,7 @@ export default function CartScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  contentWrapper: { flex: 1, maxWidth: 800, width: '100%', alignSelf: 'center' },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
@@ -276,4 +367,44 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', justifyContent: 'center', padding: 60 },
   emptyTitle: { ...Typography.heading3, marginTop: Spacing.lg },
   emptySubtitle: { ...Typography.body, marginTop: Spacing.sm },
+  collapsibleHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  summaryRow: {
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  summaryText: {
+    ...Typography.captionMedium,
+    color: Colors.textMuted,
+  },
+  paymentHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: Spacing.md,
+  },
+  splitToggle: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: Spacing.md, paddingVertical: 6,
+    borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.gold,
+  },
+  splitToggleActive: {
+    backgroundColor: Colors.gold,
+  },
+  splitToggleText: {
+    ...Typography.captionMedium,
+    color: Colors.gold,
+  },
+  splitInputContainer: {
+    flexDirection: 'row', gap: Spacing.md,
+  },
+  splitInputBox: {
+    flex: 1,
+  },
+  splitLabel: {
+    ...Typography.caption,
+    marginBottom: 4,
+    color: Colors.textMuted,
+  },
 });

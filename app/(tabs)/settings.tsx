@@ -1,7 +1,8 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, KeyboardAvoidingView, Platform,
+  ActivityIndicator, FlatList, Linking,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -9,6 +10,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getAllSettings, updateSettings, Settings } from '../../src/db/settingsDB';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../../src/constants/theme';
+import printerService from '../../src/services/printerService';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -18,13 +20,141 @@ export default function SettingsScreen() {
     restaurant_phone: '',
     tax_rate: '5',
     currency_symbol: '₹',
+    decimal_places: '2',
     receipt_footer: '',
   });
   const [saved, setSaved] = useState(false);
 
+  // Printer State
+  const [isScanning, setIsScanning] = useState(false);
+  const [devices, setDevices] = useState<any[]>([]);
+  const [connectingId, setConnectingId] = useState<string | null>(null);
+  const [paperWidth, setPaperWidth] = useState(58);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [licenseInfo, setLicenseInfo] = useState({
+    isDemo: false,
+    expiry: null as string | null,
+    clientId: '',
+    customerName: '',
+    status: '',
+  });
+  const [loadingLicense, setLoadingLicense] = useState(false);
+
   useFocusEffect(useCallback(() => {
     setSettings(getAllSettings());
+    loadPrinterSettings();
   }, []));
+
+  const loadPrinterSettings = async () => {
+    const width = await AsyncStorage.getItem('printer_paper_width');
+    if (width) setPaperWidth(parseInt(width, 10));
+
+    const licenseKey = await AsyncStorage.getItem('licenseKey');
+    if (!licenseKey) return;
+
+    const trimmedKey = licenseKey.trim();
+    const isDemo = trimmedKey.startsWith('DEMO-') || trimmedKey.startsWith('demo-');
+
+    // Show whatever we have stored immediately while API loads
+    setLicenseInfo({
+      isDemo,
+      expiry: await AsyncStorage.getItem('real_expiry') || await AsyncStorage.getItem('licenseExpiryDate') || null,
+      clientId: await AsyncStorage.getItem('real_client_id') || await AsyncStorage.getItem('clientId') || '',
+      customerName: await AsyncStorage.getItem('real_customer_name') || await AsyncStorage.getItem('customerName') || '',
+      status: await AsyncStorage.getItem('real_status') || await AsyncStorage.getItem('licenseStatus') || 'Active',
+    });
+
+    // Always refresh from API — this is the source of truth
+    setLoadingLicense(true);
+    try {
+      const response = await fetch('https://activate.imcbs.com/mobileapp/api/project/melonelite/');
+      const data = await response.json();
+
+      if (data.success) {
+        // Search in real customers
+        let customer = data.customers?.find((c: any) => c.license_key === trimmedKey);
+
+        if (customer) {
+          // Real license found
+          const freshInfo = {
+            isDemo: false,
+            expiry: customer.license_validity?.expiry_date || null,
+            clientId: customer.client_id,
+            customerName: customer.customer_name,
+            status: customer.status || 'Active',
+          };
+          setLicenseInfo(freshInfo);
+          // Persist fresh data
+          await AsyncStorage.setItem('license_type', 'real');
+          await AsyncStorage.setItem('real_license_key', trimmedKey);
+          await AsyncStorage.setItem('real_customer_name', freshInfo.customerName);
+          await AsyncStorage.setItem('real_client_id', freshInfo.clientId);
+          await AsyncStorage.setItem('real_expiry', freshInfo.expiry || '');
+          await AsyncStorage.setItem('real_status', freshInfo.status);
+          return;
+        }
+
+        // Search in demo licenses
+        const demo = data.demo_licenses?.find((d: any) => d.demo_license === trimmedKey);
+        if (demo) {
+          const freshInfo = {
+            isDemo: true,
+            expiry: demo.expires_at || null,
+            clientId: demo.client_id,
+            customerName: demo.company,
+            status: demo.status || 'Active',
+          };
+          setLicenseInfo(freshInfo);
+          await AsyncStorage.setItem('license_type', 'demo');
+          await AsyncStorage.setItem('demo_key', trimmedKey);
+          await AsyncStorage.setItem('demo_company', freshInfo.customerName);
+          await AsyncStorage.setItem('demo_client_id', freshInfo.clientId);
+          await AsyncStorage.setItem('demo_expiry', freshInfo.expiry || '');
+        }
+      }
+    } catch (err) {
+      console.error('❌ [SETTINGS] License API error:', err);
+      // Fallback: keep whatever was shown from storage
+    } finally {
+      setLoadingLicense(false);
+    }
+  };
+
+  const handleScan = async () => {
+    console.log("Settings: Starting scan...");
+    setIsScanning(true);
+    setDevices([]);
+    try {
+      const list = await printerService.getDevices();
+      setDevices(list || []);
+      console.log("Settings: Scan complete, found", list?.length || 0, "devices");
+      
+      if (list && list.length > 0) {
+        setShowDropdown(true);
+      } else {
+        Alert.alert("No Printers Found", "Could not find any Bluetooth printers nearby. Please ensure your printer is in pairing mode and Bluetooth is ON.");
+      }
+    } catch (e) {
+      console.error("Settings: Scan failed", e);
+      Alert.alert("Scan Error", "Failed to scan for Bluetooth devices.");
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const handleConnect = async (device: any) => {
+    setConnectingId(device.inner_mac_address);
+    const success = await printerService.connect(device);
+    setConnectingId(null);
+    if (success) {
+      Alert.alert("Success", `Connected to ${device.device_name || 'Printer'}`);
+    }
+  };
+
+  const handlePaperWidth = (width: number) => {
+    setPaperWidth(width);
+    printerService.setPaperWidth(width);
+  };
 
   const handleSave = () => {
     if (!settings.restaurant_name.trim()) {
@@ -63,14 +193,24 @@ export default function SettingsScreen() {
                 });
               }
 
-              // Clear local storage regardless of API success to force them out
-              await AsyncStorage.removeItem("licenseActivated");
-              await AsyncStorage.removeItem("licenseKey");
-              await AsyncStorage.removeItem("clientId");
-              await AsyncStorage.removeItem("customerName");
-              await AsyncStorage.removeItem("deviceId");
-              await AsyncStorage.removeItem("activatedModules");
-              
+              // Clear ALL license storage — old keys and new clean keys
+              await AsyncStorage.multiRemove([
+                // Old keys
+                "licenseActivated", "licenseKey", "clientId", "customerName",
+                "deviceId", "activatedModules", "projectName",
+                "isDemo", "demoExpiresAt", "licenseExpiryDate",
+                "licenseIsExpired", "licenseStatus", "lastLicenseCheck",
+                "activatedLicenses", "demoUsed",
+                // New clean keys
+                "license_type",
+                "demo_key", "demo_expiry", "demo_company", "demo_client_id",
+                "real_license_key", "real_customer_name", "real_client_id",
+                "real_expiry", "real_status", "real_is_expired",
+              ]);
+
+              // Reset license info display
+              setLicenseInfo({ isDemo: false, expiry: null, clientId: '', customerName: '', status: '' });
+
               router.replace("/license");
             } catch (error) {
               console.error("Logout error", error);
@@ -85,10 +225,26 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Settings</Text>
-        </View>
+        <View style={styles.contentWrapper}>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Settings</Text>
+          </View>
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          
+          {/* Mock Warning */}
+          {printerService.isMock && (
+            <View style={styles.warningCard}>
+              <View style={styles.warningHeader}>
+                <MaterialCommunityIcons name="alert-decagram" size={20} color="#E74C3C" />
+                <Text style={styles.warningTitle}>Setup Required</Text>
+              </View>
+              <Text style={styles.warningText}>
+                Bluetooth printing is currently in <Text style={{ fontWeight: 'bold' }}>Mock Mode</Text>. 
+                Custom printers require a <Text style={{ fontWeight: 'bold' }}>Development Build</Text>. 
+                It will NOT find real devices in Expo Go.
+              </Text>
+            </View>
+          )}
 
           {/* Restaurant Info */}
           <View style={styles.section}>
@@ -120,6 +276,100 @@ export default function SettingsScreen() {
             </View>
           </View>
 
+          {/* Bluetooth Printer */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <MaterialCommunityIcons name="printer-pos" size={18} color={Colors.gold} />
+              <Text style={styles.sectionTitle}>Bluetooth Printer</Text>
+            </View>
+            
+            <Text style={styles.fieldLabel}>Paper Width</Text>
+            <View style={styles.tabRow}>
+              <TouchableOpacity 
+                style={[styles.tab, paperWidth === 58 && styles.tabActive]}
+                onPress={() => handlePaperWidth(58)}
+              >
+                <Text style={[styles.tabText, paperWidth === 58 && styles.tabTextActive]}>58mm</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.tab, paperWidth === 80 && styles.tabActive]}
+                onPress={() => handlePaperWidth(80)}
+              >
+                <Text style={[styles.tabText, paperWidth === 80 && styles.tabTextActive]}>80mm</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.sectionHeader, { marginTop: Spacing.lg, borderBottomWidth: 0, marginBottom: Spacing.xs }]}>
+              <Text style={[styles.sectionTitle, { fontSize: 13, color: Colors.textSecondary }]}>Select Printer</Text>
+              <TouchableOpacity onPress={handleScan} disabled={isScanning}>
+                {isScanning ? (
+                  <ActivityIndicator size="small" color={Colors.gold} />
+                ) : (
+                  <MaterialCommunityIcons name="refresh" size={20} color={Colors.gold} />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity 
+              style={styles.dropdownHeader} 
+              onPress={() => setShowDropdown(!showDropdown)}
+              activeOpacity={0.7}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <MaterialCommunityIcons 
+                  name="bluetooth" 
+                  size={20} 
+                  color={printerService.connected ? Colors.success : Colors.gold} 
+                />
+                <Text style={styles.dropdownHeaderText}>
+                  {printerService.currentPrinter?.device_name || 'No printer selected'}
+                </Text>
+              </View>
+              <MaterialCommunityIcons 
+                name={showDropdown ? "chevron-up" : "chevron-down"} 
+                size={20} 
+                color={Colors.textMuted} 
+              />
+            </TouchableOpacity>
+
+            {showDropdown && (
+              <View style={styles.dropdownList}>
+                {devices.length === 0 ? (
+                  <View style={styles.emptyDropdown}>
+                    <Text style={styles.emptyText}>No devices found. Tap refresh icon to scan.</Text>
+                  </View>
+                ) : (
+                  devices.map((item, idx) => (
+                    <TouchableOpacity 
+                      key={idx} 
+                      style={[
+                        styles.dropdownItem,
+                        printerService.currentPrinter?.inner_mac_address === item.inner_mac_address && styles.dropdownItemActive
+                      ]}
+                      onPress={() => {
+                        handleConnect(item);
+                        setShowDropdown(false);
+                      }}
+                      disabled={!!connectingId}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.deviceName}>{item.device_name || 'Unknown Device'}</Text>
+                        <Text style={styles.deviceAddress}>{item.inner_mac_address}</Text>
+                      </View>
+                      {connectingId === item.inner_mac_address ? (
+                        <ActivityIndicator size="small" color={Colors.gold} />
+                      ) : (
+                        printerService.currentPrinter?.inner_mac_address === item.inner_mac_address && (
+                          <MaterialCommunityIcons name="check" size={18} color={Colors.success} />
+                        )
+                      )}
+                    </TouchableOpacity>
+                  ))
+                )}
+              </View>
+            )}
+          </View>
+
           {/* Billing */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -133,21 +383,99 @@ export default function SettingsScreen() {
                 onChangeText={v => setSettings(s => ({ ...s, currency_symbol: v }))}
                 placeholder="₹" placeholderTextColor={Colors.textMuted} />
             </View>
+            <Text style={[styles.fieldLabel, { marginTop: Spacing.md }]}>Decimal Places</Text>
+            <View style={styles.tabRow}>
+              {[0, 1, 2, 3].map(decimals => (
+                <TouchableOpacity 
+                  key={decimals}
+                  style={[styles.tab, settings.decimal_places === String(decimals) && styles.tabActive]}
+                  onPress={() => setSettings(s => ({ ...s, decimal_places: String(decimals) }))}
+                >
+                  <Text style={[styles.tabText, settings.decimal_places === String(decimals) && styles.tabTextActive]}>
+                    {decimals}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
 
-          {/* Receipt */}
+          {/* License Information */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <MaterialCommunityIcons name="receipt" size={18} color={Colors.gold} />
-              <Text style={styles.sectionTitle}>Receipt</Text>
+              <MaterialCommunityIcons name="shield-check-outline" size={18} color={Colors.gold} />
+              <Text style={styles.sectionTitle}>License Information</Text>
+              {loadingLicense && <ActivityIndicator size="small" color={Colors.gold} style={{ marginLeft: 'auto' }} />}
             </View>
-            <Text style={styles.fieldLabel}>Footer Message</Text>
-            <View style={styles.inputRow}>
-              <MaterialCommunityIcons name="message-text-outline" size={18} color={Colors.gold} style={{ marginRight: 8 }} />
-              <TextInput style={styles.input} value={settings.receipt_footer}
-                onChangeText={v => setSettings(s => ({ ...s, receipt_footer: v }))}
-                placeholder="Thank you for dining with us!" placeholderTextColor={Colors.textMuted} />
+            
+            <View style={styles.licenseRow}>
+              <Text style={styles.licenseLabel}>Status</Text>
+              <View style={[styles.licenseBadge, { backgroundColor: licenseInfo.isDemo || licenseInfo.status !== 'Active' ? Colors.goldOverlay : 'rgba(46, 204, 113, 0.1)' }]}>
+                <Text style={[styles.licenseBadgeText, { color: licenseInfo.isDemo || licenseInfo.status !== 'Active' ? Colors.gold : '#2ECC71' }]}>
+                  {licenseInfo.isDemo ? 'DEMO LICENSE' : (licenseInfo.status === 'Active' ? 'ACTIVE FULL LICENSE' : licenseInfo.status.toUpperCase())}
+                </Text>
+              </View>
             </View>
+
+            <View style={styles.licenseInfoItem}>
+              <Text style={styles.licenseLabel}>Shop Name</Text>
+              <Text style={styles.licenseValue}>{licenseInfo.customerName}</Text>
+            </View>
+
+            <View style={styles.licenseInfoItem}>
+              <Text style={styles.licenseLabel}>Client ID</Text>
+              <Text style={styles.licenseValue}>{licenseInfo.clientId}</Text>
+            </View>
+
+            {licenseInfo.expiry && (
+              <View style={styles.licenseInfoItem}>
+                <Text style={styles.licenseLabel}>{licenseInfo.isDemo ? 'Expires On' : 'License Valid Until'}</Text>
+                <Text style={[styles.licenseValue, !licenseInfo.isDemo && { color: Colors.success }]}>
+                  {new Date(licenseInfo.expiry).toLocaleDateString()}
+                </Text>
+              </View>
+            )}
+
+          </View>
+
+          {/* Contact Us */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <MaterialCommunityIcons name="headset" size={18} color={Colors.gold} />
+              <Text style={styles.sectionTitle}>Contact Us</Text>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.contactItem}
+              onPress={() => Linking.openURL('mailto:projectlead@imcbs.com')}
+            >
+              <MaterialCommunityIcons name="email-outline" size={20} color={Colors.gold} />
+              <View>
+                <Text style={styles.contactLabel}>Email Support</Text>
+                <Text style={styles.contactValue}>projectlead@imcbs.com</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.contactItem}
+              onPress={() => Linking.openURL('https://wa.me/917593820005')}
+            >
+              <MaterialCommunityIcons name="whatsapp" size={20} color="#25D366" />
+              <View>
+                <Text style={styles.contactLabel}>WhatsApp Support</Text>
+                <Text style={styles.contactValue}>+91 7593820005</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.contactItem, { borderBottomWidth: 0, paddingBottom: 0, marginBottom: 0 }]}
+              onPress={() => Linking.openURL('https://www.imcbs.com/')}
+            >
+              <MaterialCommunityIcons name="web" size={20} color={Colors.info} />
+              <View>
+                <Text style={styles.contactLabel}>Website</Text>
+                <Text style={styles.contactValue}>www.imcbs.com</Text>
+              </View>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.infoCard}>
@@ -167,6 +495,7 @@ export default function SettingsScreen() {
 
           <View style={{ height: 40 }} />
         </ScrollView>
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -174,6 +503,7 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  contentWrapper: { flex: 1, maxWidth: 800, width: '100%', alignSelf: 'center' },
   header: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md },
   headerTitle: { ...Typography.heading2 },
   scrollContent: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xxxl },
@@ -211,4 +541,141 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md, borderWidth: 1, borderColor: Colors.error,
   },
   logoutBtnText: { color: Colors.error, fontFamily: 'Poppins-Bold', fontSize: 16 },
+  tabRow: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.xs },
+  tab: {
+    flex: 1, height: 40, borderRadius: Radius.md, backgroundColor: Colors.surface,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.border,
+  },
+  tabActive: { backgroundColor: Colors.goldOverlay, borderColor: Colors.gold },
+  tabText: { ...Typography.captionMedium, color: Colors.textMuted },
+  tabTextActive: { color: Colors.gold },
+  emptyText: { ...Typography.caption, textAlign: 'center', color: Colors.textMuted, marginVertical: Spacing.lg },
+  deviceRow: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface,
+    padding: Spacing.md, borderRadius: Radius.md, marginBottom: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  deviceName: { ...Typography.bodyMedium, fontSize: 13 },
+  deviceAddress: { ...Typography.caption, fontSize: 10 },
+  dropdownHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.surface,
+    padding: Spacing.md,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    height: 50,
+  },
+  dropdownHeaderText: {
+    ...Typography.bodyMedium,
+    color: Colors.textPrimary,
+  },
+  dropdownList: {
+    marginTop: Spacing.xs,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+    ...Shadows.card,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  dropdownItemActive: {
+    backgroundColor: Colors.goldOverlay,
+  },
+  emptyDropdown: {
+    padding: Spacing.lg,
+    alignItems: 'center',
+  },
+  warningCard: {
+    backgroundColor: '#FDECEA',
+    borderRadius: Radius.lg,
+    padding: Spacing.lg,
+    marginBottom: Spacing.lg,
+    borderWidth: 1,
+    borderColor: '#F5B7B1',
+  },
+  warningHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  warningTitle: {
+    ...Typography.heading4,
+    color: '#922B21',
+    fontSize: 15,
+  },
+  warningText: {
+    ...Typography.caption,
+    color: '#7B241C',
+    lineHeight: 18,
+  },
+  licenseRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  licenseLabel: {
+    ...Typography.caption,
+    color: Colors.textMuted,
+  },
+  licenseBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+  },
+  licenseBadgeText: {
+    fontSize: 10,
+    fontFamily: 'Poppins-Bold',
+  },
+  licenseInfoItem: {
+    marginBottom: Spacing.sm,
+  },
+  licenseValue: {
+    ...Typography.bodyMedium,
+    fontSize: 13,
+    color: Colors.textPrimary,
+  },
+  upgradeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#2ECC71',
+    borderRadius: Radius.md,
+    paddingVertical: 12,
+    marginTop: Spacing.md,
+  },
+  upgradeBtnText: {
+    color: Colors.white,
+    fontFamily: 'Poppins-Bold',
+    fontSize: 13,
+  },
+  contactItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingBottom: Spacing.md,
+    marginBottom: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  contactLabel: {
+    ...Typography.captionMedium,
+    color: Colors.textMuted,
+  },
+  contactValue: {
+    ...Typography.bodyMedium,
+    color: Colors.textPrimary,
+  },
 });

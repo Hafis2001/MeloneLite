@@ -1,25 +1,32 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Alert, RefreshControl,
+  Alert, RefreshControl, Modal, TouchableWithoutFeedback,
 } from 'react-native';
 import { useFocusEffect, router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getAllOrders, getOrderById, deleteOrder, getOrderStats, Order } from '../../src/db/ordersDB';
+import { Calendar } from 'react-native-calendars';
+import { getAllOrders, getOrderById, deleteOrder, getOrderStats, Order, incrementPrintCount } from '../../src/db/ordersDB';
 import { getAllSettings } from '../../src/db/settingsDB';
 import { printReceipt, sharePDF } from '../../src/utils/printUtils';
+import { formatCurrency } from '../../src/utils/currencyUtils';
+import printerService from '../../src/services/printerService';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../../src/constants/theme';
 
 export default function OrdersScreen() {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState({ total_orders: 0, total_revenue: 0, today_orders: 0, today_revenue: 0 });
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [printingId, setPrintingId] = useState<number | null>(null);
+  
+  // Date filter state
+  const [filterDate, setFilterDate] = useState<Date>(new Date());
+  const [showCalendar, setShowCalendar] = useState(false);
 
   const loadOrders = useCallback(() => {
-    setOrders(getAllOrders());
+    setAllOrders(getAllOrders());
     setStats(getOrderStats());
   }, []);
 
@@ -32,6 +39,33 @@ export default function OrdersScreen() {
     loadOrders();
     setTimeout(() => setRefreshing(false), 600);
   }, [loadOrders]);
+
+  const changeDate = (days: number) => {
+    setFilterDate(prev => {
+      const d = new Date(prev);
+      d.setDate(d.getDate() + days);
+      return d;
+    });
+  };
+
+  const onDayPress = (day: any) => {
+    setFilterDate(new Date(day.timestamp));
+    setShowCalendar(false);
+  };
+
+  const isSameDay = (d1: Date, dateStr: string) => {
+    const d2 = new Date(dateStr);
+    return d1.getFullYear() === d2.getFullYear() &&
+           d1.getMonth() === d2.getMonth() &&
+           d1.getDate() === d2.getDate();
+  };
+
+  const isToday = isSameDay(filterDate, new Date().toISOString());
+
+  const displayedOrders = allOrders.filter(o => isSameDay(filterDate, o.created_at));
+  
+  const filteredRevenue = displayedOrders.reduce((sum, o) => sum + o.grand_total, 0);
+  const filteredCount = displayedOrders.length;
 
   const handleDelete = (order: Order) => {
     Alert.alert(
@@ -48,12 +82,43 @@ export default function OrdersScreen() {
   };
 
   const handlePrint = async (order: Order) => {
+    const full = getOrderById(order.id);
+    if (!full || !full.items) return;
+    const settings = getAllSettings();
+
+    // Check if a printer is already connected or saved
+    if (!printerService.connected && !printerService.currentPrinter) {
+      Alert.alert(
+        "Printer Not Connected",
+        "You haven't selected a Bluetooth printer yet. Would you like to go to Settings or use standard PDF print?",
+        [
+          { text: "Go to Settings", onPress: () => router.push('/settings') },
+          { 
+            text: "Standard Print", 
+            onPress: async () => {
+              setPrintingId(order.id);
+              try {
+                await printReceipt(full, full.items, settings);
+              } catch (e: any) {
+                Alert.alert('Print Error', e.message);
+              } finally {
+                setPrintingId(null);
+              }
+            } 
+          },
+          { text: "Cancel", style: "cancel" }
+        ]
+      );
+      return;
+    }
+
     setPrintingId(order.id);
     try {
-      const full = getOrderById(order.id);
-      if (!full || !full.items) return;
-      const settings = getAllSettings();
-      await printReceipt(full, full.items, settings);
+      const success = await printReceipt(full, full.items, settings);
+      if (success) {
+        incrementPrintCount(order.id);
+        loadOrders();
+      }
     } catch (e: any) {
       Alert.alert('Print Error', e?.message ?? 'Could not print');
     } finally {
@@ -67,7 +132,11 @@ export default function OrdersScreen() {
       const full = getOrderById(order.id);
       if (!full || !full.items) return;
       const settings = getAllSettings();
-      await sharePDF(full, full.items, settings);
+      const success = await sharePDF(full, full.items, settings);
+      if (success) {
+        incrementPrintCount(order.id);
+        loadOrders();
+      }
     } catch (e: any) {
       Alert.alert('PDF Error', e?.message ?? 'Could not generate PDF');
     } finally {
@@ -106,7 +175,7 @@ export default function OrdersScreen() {
             </View>
           </View>
           <View style={styles.orderHeaderRight}>
-            <Text style={styles.orderTotal}>₹{item.grand_total.toFixed(2)}</Text>
+            <Text style={styles.orderTotal}>{formatCurrency(item.grand_total)}</Text>
             <MaterialCommunityIcons
               name={isExpanded ? 'chevron-up' : 'chevron-down'}
               size={20} color={Colors.textMuted}
@@ -132,6 +201,10 @@ export default function OrdersScreen() {
             <MaterialCommunityIcons name="cash" size={12} color={Colors.success} />
             <Text style={styles.metaText}>{item.payment_method}</Text>
           </View>
+          <View style={[styles.metaChip, { backgroundColor: Colors.infoBg }]}>
+            <MaterialCommunityIcons name="printer" size={12} color={Colors.info} />
+            <Text style={[styles.metaText, { color: Colors.info, fontFamily: 'Poppins-Medium' }]}>Prints: {item.print_count || 0}</Text>
+          </View>
         </View>
 
         {/* Expanded Items */}
@@ -142,20 +215,20 @@ export default function OrdersScreen() {
               <View key={idx} style={styles.orderItemRow}>
                 <Text style={styles.orderItemName} numberOfLines={1}>{oi.item_name}</Text>
                 <Text style={styles.orderItemQty}>× {oi.quantity}</Text>
-                <Text style={styles.orderItemSubtotal}>₹{oi.subtotal.toFixed(2)}</Text>
+                <Text style={styles.orderItemSubtotal}>{formatCurrency(oi.subtotal)}</Text>
               </View>
             ))}
             <View style={styles.divider} />
             {item.discount > 0 && (
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>Discount</Text>
-                <Text style={[styles.totalValue, { color: Colors.error }]}>- ₹{item.discount.toFixed(2)}</Text>
+                <Text style={[styles.totalValue, { color: Colors.error }]}>- {formatCurrency(item.discount)}</Text>
               </View>
             )}
 
             <View style={[styles.totalRow, styles.grandTotalRow]}>
               <Text style={styles.grandTotalLabel}>Grand Total</Text>
-              <Text style={styles.grandTotalValue}>₹{item.grand_total.toFixed(2)}</Text>
+              <Text style={styles.grandTotalValue}>{formatCurrency(item.grand_total)}</Text>
             </View>
           </View>
         )}
@@ -189,39 +262,88 @@ export default function OrdersScreen() {
     );
   };
 
+  const selectedDateStr = `${filterDate.getFullYear()}-${String(filterDate.getMonth() + 1).padStart(2, '0')}-${String(filterDate.getDate()).padStart(2, '0')}`;
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
+      <View style={styles.contentWrapper}>
+        {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Orders</Text>
+        <Text style={styles.headerTitle}>Reports</Text>
       </View>
+
+      {/* Date Filter */}
+      <View style={styles.dateFilterContainer}>
+        <TouchableOpacity style={styles.dateBtn} onPress={() => changeDate(-1)}>
+          <MaterialCommunityIcons name="chevron-left" size={24} color={Colors.textPrimary} />
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={styles.dateCenterBtn} 
+          onPress={() => setShowCalendar(true)}
+        >
+          <MaterialCommunityIcons name="calendar-month" size={18} color={Colors.gold} />
+          <Text style={styles.dateText}>
+            {isToday ? "Today" : filterDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+          </Text>
+          <MaterialCommunityIcons name="chevron-down" size={16} color={Colors.textMuted} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.dateBtn} onPress={() => changeDate(1)} disabled={isToday}>
+          <MaterialCommunityIcons name="chevron-right" size={24} color={isToday ? Colors.border : Colors.textPrimary} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Calendar Modal */}
+      <Modal visible={showCalendar} transparent animationType="fade">
+        <TouchableWithoutFeedback onPress={() => setShowCalendar(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.calendarContainer}>
+                <Calendar
+                  current={selectedDateStr}
+                  onDayPress={onDayPress}
+                  maxDate={new Date().toISOString().split('T')[0]}
+                  theme={{
+                    todayTextColor: Colors.gold,
+                    selectedDayBackgroundColor: Colors.gold,
+                    selectedDayTextColor: Colors.white,
+                    arrowColor: Colors.gold,
+                  }}
+                  markedDates={{
+                    [selectedDateStr]: { selected: true, selectedColor: Colors.gold }
+                  }}
+                />
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
 
       {/* Stats Row */}
       <View style={styles.statsRow}>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>₹{stats.today_revenue.toFixed(0)}</Text>
-          <Text style={styles.statLabel}>Today's Sales</Text>
+          <Text style={styles.statValue}>{formatCurrency(filteredRevenue)}</Text>
+          <Text style={styles.statLabel}>Day's Sales</Text>
         </View>
         <View style={[styles.statCard, styles.statCardMiddle]}>
-          <Text style={styles.statValue}>{stats.today_orders}</Text>
-          <Text style={styles.statLabel}>Today's Orders</Text>
+          <Text style={styles.statValue}>{filteredCount}</Text>
+          <Text style={styles.statLabel}>Day's Orders</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>{stats.total_orders}</Text>
-          <Text style={styles.statLabel}>Total Orders</Text>
+          <Text style={styles.statValue}>{formatCurrency(stats.total_revenue)}</Text>
+          <Text style={styles.statLabel}>All-Time Rev</Text>
         </View>
       </View>
 
       {/* Orders List */}
-      {orders.length === 0 ? (
+      {displayedOrders.length === 0 ? (
         <View style={styles.emptyState}>
           <MaterialCommunityIcons name="receipt" size={64} color={Colors.textMuted} />
-          <Text style={styles.emptyTitle}>No Orders Yet</Text>
-          <Text style={styles.emptySubtitle}>Placed orders will appear here</Text>
+          <Text style={styles.emptyTitle}>No Orders Found</Text>
+          <Text style={styles.emptySubtitle}>There are no orders for this date</Text>
         </View>
       ) : (
         <FlatList
-          data={orders}
+          data={displayedOrders}
           keyExtractor={item => item.id.toString()}
           renderItem={renderOrder}
           contentContainerStyle={styles.listContent}
@@ -229,16 +351,49 @@ export default function OrdersScreen() {
           showsVerticalScrollIndicator={false}
         />
       )}
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  contentWrapper: { flex: 1, maxWidth: 800, width: '100%', alignSelf: 'center' },
   header: {
     paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
   },
   headerTitle: { ...Typography.heading2 },
+  
+  dateFilterContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
+  },
+  dateBtn: {
+    padding: Spacing.sm,
+    backgroundColor: Colors.card,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  dateCenterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.card,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  dateText: {
+    ...Typography.bodyMedium,
+    color: Colors.textPrimary,
+  },
+  
   statsRow: {
     flexDirection: 'row', paddingHorizontal: Spacing.lg,
     marginBottom: Spacing.lg, gap: Spacing.sm,
@@ -316,4 +471,16 @@ const styles = StyleSheet.create({
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xxxl },
   emptyTitle: { ...Typography.heading3, marginTop: Spacing.lg, marginBottom: Spacing.sm },
   emptySubtitle: { ...Typography.body, textAlign: 'center' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    padding: Spacing.xl,
+  },
+  calendarContainer: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    overflow: 'hidden',
+    ...Shadows.card,
+  },
 });

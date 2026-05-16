@@ -6,6 +6,7 @@ export interface Settings {
   restaurant_phone: string;
   tax_rate: string;
   currency_symbol: string;
+  decimal_places?: string;
   receipt_footer: string;
 }
 
@@ -30,6 +31,7 @@ export const getAllSettings = (): Settings => {
     restaurant_phone: getSetting('restaurant_phone'),
     tax_rate: getSetting('tax_rate'),
     currency_symbol: getSetting('currency_symbol'),
+    decimal_places: getSetting('decimal_places') || '2',
     receipt_footer: getSetting('receipt_footer'),
   };
 };

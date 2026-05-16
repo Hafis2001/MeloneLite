@@ -2,9 +2,10 @@ import { Order, OrderItem } from '../db/ordersDB';
 import { Settings } from '../db/settingsDB';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import printerService from '../services/printerService';
 
-const formatCurrency = (amount: number, symbol: string = '₹') =>
-  `${symbol}${amount.toFixed(2)}`;
+const formatCurrency = (amount: number, symbol: string = '₹', decimals: string = '2') =>
+  `${symbol}${amount.toFixed(parseInt(decimals, 10) || 2)}`;
 
 const formatDate = (dateStr: string): string => {
   try {
@@ -25,6 +26,7 @@ export const generateReceiptHTML = (
   isPdf: boolean = false
 ): string => {
   const sym = settings.currency_symbol || '₹';
+  const dec = settings.decimal_places || '2';
 
   if (isPdf) {
     // Standard A4 Invoice Format for PDF sharing
@@ -33,8 +35,8 @@ export const generateReceiptHTML = (
         <td style="padding:10px; border-bottom:1px solid #eee;">${index + 1}</td>
         <td style="padding:10px; border-bottom:1px solid #eee;">${item.item_name}</td>
         <td style="padding:10px; text-align:center; border-bottom:1px solid #eee;">${item.quantity}</td>
-        <td style="padding:10px; text-align:right; border-bottom:1px solid #eee;">${formatCurrency(item.rate, sym)}</td>
-        <td style="padding:10px; text-align:right; border-bottom:1px solid #eee; font-weight:bold;">${formatCurrency(item.subtotal, sym)}</td>
+        <td style="padding:10px; text-align:right; border-bottom:1px solid #eee;">${formatCurrency(item.rate, sym, dec)}</td>
+        <td style="padding:10px; text-align:right; border-bottom:1px solid #eee; font-weight:bold;">${formatCurrency(item.subtotal, sym, dec)}</td>
       </tr>
     `).join('');
 
@@ -114,12 +116,18 @@ export const generateReceiptHTML = (
 
         <div class="totals-container">
           <div class="totals">
-            <p><span>Subtotal:</span><span>${formatCurrency(order.subtotal, sym)}</span></p>
-            ${order.discount > 0 ? `<p><span>Discount:</span><span style="color:red;">- ${formatCurrency(order.discount, sym)}</span></p>` : ''}
+            <p><span>Subtotal:</span><span>${formatCurrency(order.subtotal, sym, dec)}</span></p>
+            ${order.discount > 0 ? `<p><span>Discount:</span><span style="color:red;">- ${formatCurrency(order.discount, sym, dec)}</span></p>` : ''}
             <div class="grand-total">
               <span>Total Amount</span>
-              <span>${formatCurrency(order.grand_total, sym)}</span>
+              <span>${formatCurrency(order.grand_total, sym, dec)}</span>
             </div>
+            ${order.is_split_payment ? `
+              <div style="margin-top:10px; border-top:1px solid #eee; padding-top:10px;">
+                <p><span>Paid by Cash:</span><span>${formatCurrency(order.cash_amount, sym, dec)}</span></p>
+                <p><span>Paid by UPI:</span><span>${formatCurrency(order.upi_amount, sym, dec)}</span></p>
+              </div>
+            ` : ''}
           </div>
         </div>
 
@@ -134,10 +142,13 @@ export const generateReceiptHTML = (
     // Thermal Receipt Format (280px width)
     const itemRows = items.map(item => `
       <tr>
-        <td style="padding:4px 2px; font-size:11px; border-bottom:1px dashed #ccc;">${item.item_name}</td>
-        <td style="padding:4px 2px; font-size:11px; text-align:center; border-bottom:1px dashed #ccc;">${item.quantity}</td>
-        <td style="padding:4px 2px; font-size:11px; text-align:right; border-bottom:1px dashed #ccc;">${formatCurrency(item.rate, sym)}</td>
-        <td style="padding:4px 2px; font-size:11px; text-align:right; border-bottom:1px dashed #ccc;">${formatCurrency(item.subtotal, sym)}</td>
+        <td colspan="4" style="padding:6px 0 2px 0; font-size:12px; font-weight:bold;">${item.item_name}</td>
+      </tr>
+      <tr>
+        <td style="padding:2px 0 6px 0; font-size:11px; color:#444;"></td>
+        <td style="padding:2px 0 6px 0; font-size:11px; text-align:center; border-bottom:1px dashed #ccc;">${item.quantity}</td>
+        <td style="padding:2px 0 6px 0; font-size:11px; text-align:right; border-bottom:1px dashed #ccc;">${formatCurrency(item.rate, sym, dec)}</td>
+        <td style="padding:2px 0 6px 0; font-size:11px; text-align:right; border-bottom:1px dashed #ccc;">${formatCurrency(item.subtotal, sym, dec)}</td>
       </tr>
     `).join('');
 
@@ -203,12 +214,16 @@ export const generateReceiptHTML = (
         </table>
 
         <div class="totals">
-          <p><span>Subtotal:</span><span>${formatCurrency(order.subtotal, sym)}</span></p>
-          ${order.discount > 0 ? `<p><span>Discount:</span><span>- ${formatCurrency(order.discount, sym)}</span></p>` : ''}
+          <p><span>Subtotal:</span><span>${formatCurrency(order.subtotal, sym, dec)}</span></p>
+          ${order.discount > 0 ? `<p><span>Discount:</span><span>- ${formatCurrency(order.discount, sym, dec)}</span></p>` : ''}
           <div class="grand-total">
             <span>TOTAL</span>
-            <span>${formatCurrency(order.grand_total, sym)}</span>
+            <span>${formatCurrency(order.grand_total, sym, dec)}</span>
           </div>
+          ${order.is_split_payment ? `
+            <p><span>- Cash:</span><span>${formatCurrency(order.cash_amount, sym, dec)}</span></p>
+            <p><span>- UPI:</span><span>${formatCurrency(order.upi_amount, sym, dec)}</span></p>
+          ` : ''}
         </div>
 
         <div class="footer">
@@ -225,23 +240,42 @@ export const printReceipt = async (
   order: Order,
   items: OrderItem[],
   settings: Settings
-): Promise<void> => {
-  const html = generateReceiptHTML(order, items, settings, false);
-  await Print.printAsync({ html });
+): Promise<boolean> => {
+  try {
+    // If we have a connected printer or a saved one to reconnect to
+    if (printerService.connected || printerService.currentPrinter) {
+      return await printerService.printOrder(order, items, settings);
+    } else {
+      // No printer configured, fallback to system print (PDF)
+      const html = generateReceiptHTML(order, items, settings, false);
+      await Print.printAsync({ html });
+      return true; // We assume system print "started" successfully
+    }
+  } catch (error: any) {
+    console.error('Print Error:', error);
+    return false;
+  }
 };
 
 export const sharePDF = async (
   order: Order,
   items: OrderItem[],
   settings: Settings
-): Promise<void> => {
-  const html = generateReceiptHTML(order, items, settings, true);
-  const { uri } = await Print.printToFileAsync({ html, base64: false });
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(uri, {
-      mimeType: 'application/pdf',
-      dialogTitle: `Share Bill - ${order.order_number}`,
-      UTI: 'com.adobe.pdf',
-    });
+): Promise<boolean> => {
+  try {
+    const html = generateReceiptHTML(order, items, settings, true);
+    const { uri } = await Print.printToFileAsync({ html, base64: false });
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: `Share Bill - ${order.order_number}`,
+        UTI: 'com.adobe.pdf',
+      });
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('PDF Share Error:', error);
+    return false;
   }
 };

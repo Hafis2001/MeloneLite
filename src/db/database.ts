@@ -56,9 +56,29 @@ export const initDatabase = async (): Promise<void> => {
       payment_method TEXT DEFAULT 'Cash',
       status TEXT DEFAULT 'completed',
       notes TEXT DEFAULT '',
+      print_count INTEGER DEFAULT 0,
+      cash_amount REAL DEFAULT 0,
+      upi_amount REAL DEFAULT 0,
+      is_split_payment INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now','localtime'))
     );
   `);
+
+  // Migrations for existing databases
+  const migrations = [
+    'ALTER TABLE orders ADD COLUMN print_count INTEGER DEFAULT 0;',
+    'ALTER TABLE orders ADD COLUMN cash_amount REAL DEFAULT 0;',
+    'ALTER TABLE orders ADD COLUMN upi_amount REAL DEFAULT 0;',
+    'ALTER TABLE orders ADD COLUMN is_split_payment INTEGER DEFAULT 0;',
+  ];
+
+  migrations.forEach(sql => {
+    try {
+      database.execSync(sql);
+    } catch (e) {
+      // Column already exists or table busy
+    }
+  });
 
   // Order items table
   database.execSync(`
@@ -91,6 +111,7 @@ export const initDatabase = async (): Promise<void> => {
     ('restaurant_phone', ''),
     ('tax_rate', '5'),
     ('currency_symbol', '₹'),
+    ('decimal_places', '2'),
     ('receipt_footer', 'Thank you for dining with us!');
   `);
 };

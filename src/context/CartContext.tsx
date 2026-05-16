@@ -13,6 +13,9 @@ interface CartState {
   paymentMethod: string;
   notes: string;
   discount: number;
+  isSplitPayment: boolean;
+  cashAmount: number;
+  upiAmount: number;
 }
 
 type CartAction =
@@ -24,7 +27,10 @@ type CartAction =
   | { type: 'SET_TABLE'; tableNo: string }
   | { type: 'SET_PAYMENT'; method: string }
   | { type: 'SET_NOTES'; notes: string }
-  | { type: 'SET_DISCOUNT'; discount: number };
+  | { type: 'SET_DISCOUNT'; discount: number }
+  | { type: 'SET_SPLIT_PAYMENT'; enabled: boolean }
+  | { type: 'SET_CASH_AMOUNT'; amount: number }
+  | { type: 'SET_UPI_AMOUNT'; amount: number };
 
 const initialState: CartState = {
   items: [],
@@ -33,6 +39,9 @@ const initialState: CartState = {
   paymentMethod: 'Cash',
   notes: '',
   discount: 0,
+  isSplitPayment: false,
+  cashAmount: 0,
+  upiAmount: 0,
 };
 
 function cartReducer(state: CartState, action: CartAction): CartState {
@@ -72,10 +81,14 @@ function cartReducer(state: CartState, action: CartAction): CartState {
       return { ...state, tableNo: action.tableNo };
     case 'SET_PAYMENT':
       return { ...state, paymentMethod: action.method };
-    case 'SET_NOTES':
-      return { ...state, notes: action.notes };
     case 'SET_DISCOUNT':
       return { ...state, discount: action.discount };
+    case 'SET_SPLIT_PAYMENT':
+      return { ...state, isSplitPayment: action.enabled };
+    case 'SET_CASH_AMOUNT':
+      return { ...state, cashAmount: action.amount };
+    case 'SET_UPI_AMOUNT':
+      return { ...state, upiAmount: action.amount };
     default:
       return state;
   }
@@ -92,6 +105,9 @@ interface CartContextType {
   setPaymentMethod: (method: string) => void;
   setNotes: (notes: string) => void;
   setDiscount: (discount: number) => void;
+  setSplitPayment: (enabled: boolean) => void;
+  setCashAmount: (amount: number) => void;
+  setUpiAmount: (amount: number) => void;
   getTotalItems: () => number;
   getSubtotal: () => number;
   getItemQuantity: (itemId: number) => number;
@@ -111,6 +127,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const setPaymentMethod = useCallback((method: string) => dispatch({ type: 'SET_PAYMENT', method }), []);
   const setNotes = useCallback((notes: string) => dispatch({ type: 'SET_NOTES', notes }), []);
   const setDiscount = useCallback((discount: number) => dispatch({ type: 'SET_DISCOUNT', discount }), []);
+  const setSplitPayment = useCallback((enabled: boolean) => dispatch({ type: 'SET_SPLIT_PAYMENT', enabled }), []);
+  const setCashAmount = useCallback((amount: number) => dispatch({ type: 'SET_CASH_AMOUNT', amount }), []);
+  const setUpiAmount = useCallback((amount: number) => dispatch({ type: 'SET_UPI_AMOUNT', amount }), []);
 
   const getTotalItems = useCallback(() =>
     state.items.reduce((sum, ci) => sum + ci.quantity, 0), [state.items]);
@@ -125,6 +144,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <CartContext.Provider value={{
       state, addItem, removeItem, updateQuantity, clearCart,
       setCustomerName, setTableNo, setPaymentMethod, setNotes, setDiscount,
+      setSplitPayment, setCashAmount, setUpiAmount,
       getTotalItems, getSubtotal, getItemQuantity,
     }}>
       {children}

@@ -12,6 +12,8 @@ import {
 } from '../src/db/itemsDB';
 import { getAllCategories, Category } from '../src/db/categoriesDB';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../src/constants/theme';
+import { generateAIImage } from '../src/services/aiService';
+import { getSetting } from '../src/db/settingsDB';
 
 export default function ItemFormScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -25,10 +27,24 @@ export default function ItemFormScreen() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryDropdown, setCategoryDropdown] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [pendingAI, setPendingAI] = useState(false);
+  const [currencySymbol, setCurrencySymbol] = useState('₹');
+
+  const handleAIImage = async (isSilent = false) => {
+    if (!itemName.trim()) {
+      if (!isSilent) Alert.alert('AI Generator', 'Please enter an item name first.');
+      return;
+    }
+    setPendingAI(true);
+    setImageUri('https://via.placeholder.com/300?text=AI+Generating...'); // Temporary placeholder
+    if (!isSilent) Alert.alert('AI Queued', 'Image will be generated in the background after you save.');
+  };
 
   useEffect(() => {
     const cats = getAllCategories();
     setCategories(cats);
+    setCurrencySymbol(getSetting('currency_symbol') || '₹');
     if (isEdit && id) {
       const item = getItemById(parseInt(id));
       if (item) {
@@ -83,12 +99,45 @@ export default function ItemFormScreen() {
 
     setSaving(true);
     try {
+      let savedId = isEdit ? parseInt(id!) : 0;
       if (isEdit && id) {
         const item = getItemById(parseInt(id));
         updateItem(parseInt(id), itemCode, itemName, rateNum, categoryId, imageUri, item?.is_available ?? 1);
       } else {
-        addItem(itemCode, itemName, rateNum, categoryId, imageUri);
+        savedId = addItem(itemCode, itemName, rateNum, categoryId, imageUri);
       }
+
+      // BACKGROUND AI GENERATION
+      if (pendingAI) {
+        const cat = categories.find(c => c.id === categoryId);
+        const nameToUse = itemName;
+        const catToUse = cat?.name || '';
+        const finalId = savedId;
+        const currentItem = getItemById(finalId);
+
+        // Start background process without awaiting
+        (async () => {
+          try {
+            console.log(`Background AI starting for Item ${finalId}...`);
+            const url = await generateAIImage(nameToUse, catToUse);
+            if (url) {
+              updateItem(
+                finalId,
+                itemCode,
+                nameToUse,
+                rateNum,
+                categoryId,
+                url, // The new AI URL
+                currentItem?.is_available ?? 1
+              );
+              console.log(`Background AI complete for Item ${finalId}`);
+            }
+          } catch (err) {
+            console.error('Background AI failed:', err);
+          }
+        })();
+      }
+
       router.back();
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Could not save item');
@@ -102,7 +151,8 @@ export default function ItemFormScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        {/* Header */}
+        <View style={styles.contentWrapper}>
+          {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
             <MaterialCommunityIcons name="arrow-left" size={24} color={Colors.textPrimary} />
@@ -115,17 +165,33 @@ export default function ItemFormScreen() {
           keyboardShouldPersistTaps="handled">
 
           {/* Image Picker */}
-          <TouchableOpacity style={styles.imagePicker} onPress={pickImage} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.imagePicker} onPress={pickImage} activeOpacity={0.8} disabled={isGeneratingAI}>
             {imageUri ? (
               <Image source={{ uri: imageUri }} style={styles.imagePreview} resizeMode="cover" />
+            ) : isGeneratingAI ? (
+              <View style={styles.imagePlaceholder}>
+                <MaterialCommunityIcons name="loading" size={40} color={Colors.gold} style={{ transform: [{ rotate: '45deg' }] }} />
+                <Text style={styles.imageHint}>Generating AI Image...</Text>
+              </View>
             ) : (
               <View style={styles.imagePlaceholder}>
                 <MaterialCommunityIcons name="camera-plus-outline" size={40} color={Colors.gold} />
                 <Text style={styles.imageHint}>Tap to add photo</Text>
                 <Text style={styles.imageHintSub}>(optional)</Text>
+                
+                <TouchableOpacity 
+                  style={styles.aiTrigger} 
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleAIImage();
+                  }}
+                >
+                  <MaterialCommunityIcons name="auto-fix" size={16} color={Colors.textInverse} />
+                  <Text style={styles.aiTriggerText}>AI Generate</Text>
+                </TouchableOpacity>
               </View>
             )}
-            {imageUri && (
+            {imageUri && !isGeneratingAI && (
               <View style={styles.imageEditBadge}>
                 <MaterialCommunityIcons name="pencil" size={14} color={Colors.white} />
               </View>
@@ -152,9 +218,9 @@ export default function ItemFormScreen() {
             </View>
 
             {/* Rate */}
-            <Text style={[styles.label, { marginTop: Spacing.lg }]}>Rate (₹) *</Text>
+            <Text style={[styles.label, { marginTop: Spacing.lg }]}>Rate ({currencySymbol}) *</Text>
             <View style={styles.inputRow}>
-              <MaterialCommunityIcons name="currency-inr" size={18} color={Colors.gold} style={{ marginRight: 8 }} />
+              <Text style={{ marginRight: 8, color: Colors.gold, fontFamily: 'Poppins-Bold' }}>{currencySymbol}</Text>
               <TextInput style={styles.input} value={rate} onChangeText={setRate}
                 placeholder="0.00" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
             </View>
@@ -214,6 +280,7 @@ export default function ItemFormScreen() {
             <Text style={styles.saveBtnText}>{saving ? 'Saving...' : isEdit ? 'Save Changes' : 'Add Item'}</Text>
           </TouchableOpacity>
         </View>
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -221,6 +288,7 @@ export default function ItemFormScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  contentWrapper: { flex: 1, maxWidth: 800, width: '100%', alignSelf: 'center' },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
@@ -283,4 +351,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.gold, borderRadius: Radius.lg, paddingVertical: 16, ...Shadows.button,
   },
   saveBtnText: { color: Colors.textInverse, fontFamily: 'Poppins-Bold', fontSize: 16 },
+  aiTrigger: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.gold,
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: Radius.md,
+    marginTop: 12, gap: 6,
+  },
+  aiTriggerText: { color: Colors.textInverse, fontFamily: 'Poppins-Medium', fontSize: 12 },
 });

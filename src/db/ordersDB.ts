@@ -24,9 +24,18 @@ export interface Order {
   payment_method: string;
   status: string;
   notes: string;
+  print_count: number;
+  cash_amount: number;
+  upi_amount: number;
+  is_split_payment: number;
   created_at: string;
   items?: OrderItem[];
 }
+
+export const incrementPrintCount = (orderId: number): void => {
+  const db = getDB();
+  db.runSync('UPDATE orders SET print_count = print_count + 1 WHERE id = ?', [orderId]);
+};
 
 export const generateOrderNumber = (): string => {
   const db = getDB();
@@ -48,6 +57,9 @@ export const placeOrder = (
     grand_total: number;
     payment_method: string;
     notes: string;
+    cash_amount?: number;
+    upi_amount?: number;
+    is_split_payment?: number;
   },
   items: OrderItem[]
 ): number => {
@@ -55,8 +67,8 @@ export const placeOrder = (
   const order_number = generateOrderNumber();
 
   const result = db.runSync(
-    `INSERT INTO orders (order_number, customer_name, table_no, subtotal, tax_rate, tax_amount, discount, grand_total, payment_method, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO orders (order_number, customer_name, table_no, subtotal, tax_rate, tax_amount, discount, grand_total, payment_method, notes, cash_amount, upi_amount, is_split_payment)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       order_number,
       orderData.customer_name,
@@ -68,6 +80,9 @@ export const placeOrder = (
       orderData.grand_total,
       orderData.payment_method,
       orderData.notes,
+      orderData.cash_amount || 0,
+      orderData.upi_amount || 0,
+      orderData.is_split_payment || 0,
     ]
   );
 

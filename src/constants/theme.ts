@@ -26,6 +26,7 @@ export const Colors = {
   warning: '#F59E0B',
   warningBg: '#2D1F0A',
   info: '#3B82F6',
+  infoBg: '#0F1A2D',
 
   white: '#FFFFFF',
   black: '#000000',

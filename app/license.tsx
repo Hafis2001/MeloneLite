@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Application from "expo-application";
 import * as Device from "expo-device";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -42,60 +42,33 @@ const addLicenseToStorage = async (licenseData: any) => {
 
 export default function LicenseActivationScreen({ onActivationSuccess }: { onActivationSuccess?: () => void }) {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const [licenseKey, setLicenseKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [deviceId, setDeviceId] = useState("");
   const [deviceName, setDeviceName] = useState("");
   const [checking, setChecking] = useState(true);
   const [isAddingLicense, setIsAddingLicense] = useState(false);
+  const [showDemoForm, setShowDemoForm] = useState(false);
+  const [demoShopName, setDemoShopName] = useState("");
+  const [demoPhone, setDemoPhone] = useState("");
+  const [demoUsed, setDemoUsed] = useState(false);
+  const [demoRemainingDays, setDemoRemainingDays] = useState<number | null>(null);
+  const [isUpgradeMode, setIsUpgradeMode] = useState(false);
 
   useEffect(() => {
-    initializeApp();
-  }, []);
-
-  const requestAndroidPermissions = async () => {
-    if (Platform.OS !== 'android') {
-      return true;
+    if (params.mode === 'upgrade') {
+      setIsUpgradeMode(true);
     }
-
-    try {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
-        {
-          title: "Device ID Permission",
-          message: "This app needs access to your device ID for license activation.",
-          buttonNeutral: "Ask Me Later",
-          buttonNegative: "Cancel",
-          buttonPositive: "OK"
-        }
-      );
-
-      if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-        console.log("✅ Phone state permission granted");
-        return true;
-      } else {
-        console.log("❌ Phone state permission denied");
-        return false;
-      }
-    } catch (err) {
-      console.warn("Permission request error:", err);
-      return false;
-    }
-  };
+    initializeApp(params.mode === 'upgrade');
+  }, [params.mode]);
 
   const getDeviceId = async () => {
     try {
       let id: string | null = null;
 
       if (Platform.OS === "android") {
-        // Request permission first
-        const hasPermission = await requestAndroidPermissions();
-
-        if (!hasPermission) {
-          throw new Error("Permission denied. Please grant phone state permission to use this app.");
-        }
-
-        // Method 1: Application.androidId
+        // Method 1: Application.androidId (Synchronous)
         id = Application.androidId;
         console.log("Method 1 - Application.androidId:", id);
 
@@ -104,7 +77,7 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
           return id;
         }
 
-        // Method 2: Try getting from native module directly using Application.getAndroidId()
+        // Method 2: Application.getAndroidId() (Asynchronous)
         if (Application.getAndroidId) {
           try {
             id = await Application.getAndroidId();
@@ -268,8 +241,25 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
         return;
       }
 
+      // Check if demo was already used
+      const used = await AsyncStorage.getItem("demoUsed");
+      const expiryStr = await AsyncStorage.getItem("demo_expiry") || await AsyncStorage.getItem("demoExpiresAt");
+      console.log("📱 Demo Used status:", used, "Expiry:", expiryStr);
+      
+      if (used === "true") {
+        setDemoUsed(true);
+        if (expiryStr) {
+          const expiry = new Date(expiryStr);
+          const now = new Date();
+          const diff = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          if (diff > 0) setDemoRemainingDays(diff);
+        }
+      }
+
       // First time - check if device is already registered in the API
       const isRegistered = await checkDeviceRegistration(id);
+      console.log("📱 Device Registered:", isRegistered);
+      console.log("📱 isAddingLicense:", hasExistingLicenses);
 
       if (isRegistered) {
         console.log("✅ Device already registered, skipping license screen");
@@ -325,32 +315,19 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
             if (deviceFound) {
               console.log("✅ Device found in customer:", customer.customer_name);
 
-              // Store customer info and add to licenses array
+              // Store in new clean real license keys
               await AsyncStorage.setItem("licenseActivated", "true");
-              if (deviceIdToCheck) await AsyncStorage.setItem("deviceId", deviceIdToCheck);
-              await AsyncStorage.setItem("projectName", data.project_name);
-
-              // Add to licenses array
-              await addLicenseToStorage({
-                license_key: customer.license_key,
-                client_id: customer.client_id,
-                shop_name: customer.customer_name,
-                customer_name: customer.customer_name,
-                modules: customer.modules || [],
-                isDemo: false
-              });
-
-              // Set as current license ONLY if no current license exists
-              const currentClientId = await AsyncStorage.getItem("clientId");
-              if (!currentClientId) {
-                await AsyncStorage.setItem("licenseKey", customer.license_key);
-                await AsyncStorage.setItem("clientId", customer.client_id);
-                await AsyncStorage.setItem("customerName", customer.customer_name);
-                if (customer.modules) {
-                  await AsyncStorage.setItem("activatedModules", JSON.stringify(customer.modules));
-                }
-                await AsyncStorage.removeItem("isDemo");
+              await AsyncStorage.setItem("licenseKey", customer.license_key);
+              await AsyncStorage.setItem("license_type", "real");
+              await AsyncStorage.setItem("real_license_key", customer.license_key);
+              await AsyncStorage.setItem("real_customer_name", customer.customer_name);
+              await AsyncStorage.setItem("real_client_id", customer.client_id);
+              await AsyncStorage.setItem("real_status", customer.status || "Active");
+              if (customer.license_validity) {
+                await AsyncStorage.setItem("real_expiry", customer.license_validity.expiry_date || "");
+                await AsyncStorage.setItem("real_is_expired", customer.license_validity.is_expired ? "true" : "false");
               }
+              if (deviceIdToCheck) await AsyncStorage.setItem("deviceId", deviceIdToCheck);
 
               console.log("✅ Stored client_id:", customer.client_id);
               return true;
@@ -506,24 +483,52 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
         });
 
         // Set as current license ONLY if in adding mode (don't overwrite existing)
-        if (isAddingLicense) {
+        if (isAddingLicense && !isUpgradeMode) {
           // Don't change current license, just add to array
           console.log("✅ License added to array, keeping current license active");
         } else {
-          // First license, set as current
+          // First license OR Upgrade mode - set as current
+          console.log("🔄 Setting as current main license (Already Registered branch)");
           await AsyncStorage.setItem("licenseKey", licenseKey.trim());
           await AsyncStorage.setItem("clientId", customer.client_id);
           await AsyncStorage.setItem("customerName", customer.customer_name);
           if (customer.modules) {
             await AsyncStorage.setItem("activatedModules", JSON.stringify(customer.modules));
           }
+          
           if (isDemo) {
-            await AsyncStorage.setItem("isDemo", "true");
-            await AsyncStorage.setItem("demoExpiresAt", customer.expires_at);
+            // DEMO: Save only to demo-specific keys
+            await AsyncStorage.setItem("license_type", "demo");
+            await AsyncStorage.setItem("demo_key", licenseKey.trim());
+            await AsyncStorage.setItem("demo_expiry", customer.expires_at || "");
+            await AsyncStorage.setItem("demo_company", customer.customer_name || "");
+            await AsyncStorage.setItem("demo_client_id", customer.client_id || "");
+            // Clear any leftover real license data
+            await AsyncStorage.removeItem("real_license_key");
+            await AsyncStorage.removeItem("real_customer_name");
+            await AsyncStorage.removeItem("real_client_id");
+            await AsyncStorage.removeItem("real_expiry");
+            await AsyncStorage.removeItem("real_status");
           } else {
-            await AsyncStorage.removeItem("isDemo");
-            await AsyncStorage.removeItem("demoExpiresAt");
+            // REAL LICENSE: Save only to real-specific keys
+            await AsyncStorage.setItem("license_type", "real");
+            await AsyncStorage.setItem("real_license_key", licenseKey.trim());
+            await AsyncStorage.setItem("real_customer_name", customer.customer_name || "");
+            await AsyncStorage.setItem("real_client_id", customer.client_id || "");
+            await AsyncStorage.setItem("real_status", customer.status || "Active");
+            if (customer.license_validity) {
+              await AsyncStorage.setItem("real_expiry", customer.license_validity.expiry_date || "");
+              await AsyncStorage.setItem("real_is_expired", customer.license_validity.is_expired ? "true" : "false");
+            }
+            // Clear demo data
+            await AsyncStorage.removeItem("demo_key");
+            await AsyncStorage.removeItem("demo_expiry");
+            await AsyncStorage.removeItem("demo_company");
+            await AsyncStorage.removeItem("demo_client_id");
           }
+          // Shared: licenseKey for routing checks
+          await AsyncStorage.setItem("licenseKey", licenseKey.trim());
+          await AsyncStorage.setItem("licenseActivated", "true");
         }
 
         console.log("✅ Device already registered");
@@ -619,24 +624,50 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
         });
 
         // Set as current license ONLY if in adding mode (don't overwrite existing)
-        if (isAddingLicense) {
+        if (isAddingLicense && !isUpgradeMode) {
           // Don't change current license, just add to array
           console.log("✅ License added to array, keeping current license active");
         } else {
-          // First license, set as current
+          // First license OR Upgrade mode - set as current
           await AsyncStorage.setItem("licenseKey", licenseKey.trim());
           await AsyncStorage.setItem("clientId", customer.client_id);
           await AsyncStorage.setItem("customerName", customer.customer_name);
           if (customer.modules) {
             await AsyncStorage.setItem("activatedModules", JSON.stringify(customer.modules));
           }
+          console.log("🎟️ Activating License - isDemo:", isDemo);
           if (isDemo) {
-            await AsyncStorage.setItem("isDemo", "true");
-            await AsyncStorage.setItem("demoExpiresAt", customer.expires_at || "");
+            // DEMO: Save only to demo-specific keys
+            await AsyncStorage.setItem("license_type", "demo");
+            await AsyncStorage.setItem("demo_key", licenseKey.trim());
+            await AsyncStorage.setItem("demo_expiry", customer.expires_at || "");
+            await AsyncStorage.setItem("demo_company", customer.customer_name || "");
+            await AsyncStorage.setItem("demo_client_id", customer.client_id || "");
+            // Clear real license data
+            await AsyncStorage.removeItem("real_license_key");
+            await AsyncStorage.removeItem("real_customer_name");
+            await AsyncStorage.removeItem("real_client_id");
+            await AsyncStorage.removeItem("real_expiry");
+            await AsyncStorage.removeItem("real_status");
           } else {
-            await AsyncStorage.removeItem("isDemo");
-            await AsyncStorage.removeItem("demoExpiresAt");
+            // REAL LICENSE: Save only to real-specific keys
+            await AsyncStorage.setItem("license_type", "real");
+            await AsyncStorage.setItem("real_license_key", licenseKey.trim());
+            await AsyncStorage.setItem("real_customer_name", customer.customer_name || "");
+            await AsyncStorage.setItem("real_client_id", customer.client_id || "");
+            await AsyncStorage.setItem("real_status", customer.status || "Active");
+            if (customer.license_validity) {
+              await AsyncStorage.setItem("real_expiry", customer.license_validity.expiry_date || "");
+              await AsyncStorage.setItem("real_is_expired", customer.license_validity.is_expired ? "true" : "false");
+            }
+            // Clear demo data
+            await AsyncStorage.removeItem("demo_key");
+            await AsyncStorage.removeItem("demo_expiry");
+            await AsyncStorage.removeItem("demo_company");
+            await AsyncStorage.removeItem("demo_client_id");
           }
+          // Shared routing key
+          await AsyncStorage.setItem("licenseKey", licenseKey.trim());
         }
 
         console.log("✅ Device registered successfully!");
@@ -692,6 +723,75 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
     }
   };
 
+  const handleActivateDemo = async () => {
+    if (!demoShopName.trim() || !demoPhone.trim()) {
+      Alert.alert("Required", "Please enter both Shop Name and Phone Number");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // 1. Check for existing demo
+      const existingExpiry = await AsyncStorage.getItem("demoExpiresAt");
+      let expiry: Date;
+
+      if (existingExpiry) {
+        expiry = new Date(existingExpiry);
+        if (expiry.getTime() < Date.now()) {
+          Alert.alert("Demo Expired", "Your 5-day demo has expired. Please activate a full license.");
+          setLoading(false);
+          return;
+        }
+        console.log("🔄 Continuing existing demo until:", expiry.toISOString());
+      } else {
+        // Create new demo expiry
+        expiry = new Date();
+        expiry.setDate(expiry.getDate() + 5);
+        console.log("🆕 Starting new 5-day demo...");
+      }
+
+      // 2. Send WhatsApp Message (Only if new demo)
+      if (!existingExpiry) {
+        const MSG = `melonlite enquiry \nshopname : ${demoShopName}\nphone number : ${demoPhone}`;
+        const encodedMsg = encodeURIComponent(MSG);
+        
+        console.log("📤 Sending Demo Enquiry to WhatsApp recipients...");
+        const recipients = ["9072791379", "9946545535"];
+        
+        await Promise.all(recipients.map(recipient => {
+          const url = `https://app.dxing.in/api/send/whatsapp?secret=4d8911f61a3eff1123ba4b11408f66697ab8bdf5&account=1778132749812b4ba287f5ee0bc9d43bbf5bbe87fb69fc270dc7c77&recipient=${recipient}&type=text&message=${encodedMsg}&priority=1`;
+          return fetch(url).catch(err => console.error(`Failed to send to ${recipient}:`, err));
+        }));
+      }
+
+      // 3. Setup Demo Data using new clean keys
+      const demoKey = "DEMO-" + Math.random().toString(36).substring(7).toUpperCase();
+      const demoClientId = "DEMO_" + Date.now();
+
+      await AsyncStorage.setItem("licenseActivated", "true");
+      await AsyncStorage.setItem("licenseKey", demoKey);          // Shared routing key
+      await AsyncStorage.setItem("license_type", "demo");         // Clean type flag
+      await AsyncStorage.setItem("demo_key", demoKey);
+      await AsyncStorage.setItem("demo_expiry", expiry.toISOString());
+      await AsyncStorage.setItem("demo_company", demoShopName);
+      await AsyncStorage.setItem("demo_client_id", demoClientId);
+      await AsyncStorage.setItem("demoUsed", "true");             // Prevent re-use
+      // Clear any leftover real license data
+      await AsyncStorage.multiRemove(["real_license_key", "real_customer_name", "real_client_id", "real_expiry", "real_status"]);
+
+      Alert.alert(
+        existingExpiry ? "Demo Restored" : "Demo Activated",
+        `Welcome! Your demo expires on ${expiry.toLocaleDateString()}.`,
+        [{ text: "Start Using App", onPress: () => router.replace('/(tabs)') }]
+      );
+    } catch (error) {
+      console.error("Demo activation error:", error);
+      Alert.alert("Error", "Failed to activate demo. Please check your connection.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Show loading screen while checking registration
   if (checking) {
     return (
@@ -717,10 +817,10 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
       style={styles.container}
     >
       <View style={styles.content}>
-        {isAddingLicense && onActivationSuccess && (
+        {(isAddingLicense || isUpgradeMode) && (
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => onActivationSuccess()}
+            onPress={() => isUpgradeMode ? router.back() : (onActivationSuccess && onActivationSuccess())}
           >
             <Text style={styles.backButtonText}>← Back</Text>
           </TouchableOpacity>
@@ -746,37 +846,106 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
           </Text>
         </View>
 
-        {/* License Key Input */}
-        <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>License Key</Text>
-          <TextInput
-            style={styles.input}
-            value={licenseKey}
-            onChangeText={setLicenseKey}
-            placeholder="Enter license key"
-            placeholderTextColor="#666"
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!loading}
-          />
-        </View>
-
-        {/* Activate Button */}
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={handleActivate}
-          disabled={loading}
-          activeOpacity={0.8}
-        >
-          {loading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator color="#0D0D0D" />
-              <Text style={styles.loadingText}>Validating...</Text>
+        {/* License Key Input (Only if not demo mode) */}
+        {!showDemoForm ? (
+          <>
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>License Key</Text>
+              <TextInput
+                style={styles.input}
+                value={licenseKey}
+                onChangeText={setLicenseKey}
+                placeholder="Enter license key"
+                placeholderTextColor="#666"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!loading}
+              />
             </View>
-          ) : (
-            <Text style={styles.buttonText}>Activate License</Text>
-          )}
-        </TouchableOpacity>
+
+            {/* Activate Button */}
+            <TouchableOpacity
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleActivate}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              {loading ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator color="#0D0D0D" />
+                  <Text style={styles.loadingText}>Validating...</Text>
+                </View>
+              ) : (
+                <Text style={styles.buttonText}>Activate License</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.demoLink} 
+              onPress={() => {
+                if (demoUsed && demoRemainingDays === null) {
+                  Alert.alert("Demo Expired", "Your 5-day demo has expired. Please activate a full license.");
+                } else if (demoRemainingDays !== null) {
+                  handleActivateDemo(); // Resume immediately
+                } else {
+                  setShowDemoForm(true);
+                }
+              }}
+              disabled={loading}
+            >
+              <Text style={styles.demoLinkText}>
+                {demoRemainingDays !== null 
+                  ? `Continue Demo (${demoRemainingDays} days left)` 
+                  : (demoUsed ? "Demo Expired" : "Try Demo for 5 Days")}
+              </Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Shop Name</Text>
+              <TextInput
+                style={styles.input}
+                value={demoShopName}
+                onChangeText={setDemoShopName}
+                placeholder="Enter your shop name"
+                placeholderTextColor="#666"
+                editable={!loading}
+              />
+              
+              <Text style={[styles.inputLabel, { marginTop: 20 }]}>Phone Number</Text>
+              <TextInput
+                style={styles.input}
+                value={demoPhone}
+                onChangeText={setDemoPhone}
+                placeholder="Enter phone number"
+                placeholderTextColor="#666"
+                keyboardType="phone-pad"
+                editable={!loading}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: '#FFD700' }, loading && styles.buttonDisabled]}
+              onPress={handleActivateDemo}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#0D0D0D" />
+              ) : (
+                <Text style={styles.buttonText}>Start 5-Day Demo</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.demoLink} 
+              onPress={() => setShowDemoForm(false)}
+              disabled={loading}
+            >
+              <Text style={styles.demoLinkText}>Back to License Key</Text>
+            </TouchableOpacity>
+          </>
+        )}
 
         <Text style={styles.footerText}>
           By activating, you agree to our terms of service
@@ -912,8 +1081,17 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   backButtonText: {
-    color: '#FFD700',
     fontSize: 14,
     fontFamily: 'Poppins-Medium',
+  },
+  demoLink: {
+    alignItems: 'center',
+    padding: 10,
+  },
+  demoLinkText: {
+    color: '#FFD700',
+    fontSize: 14,
+    fontFamily: 'Poppins-SemiBold',
+    textDecorationLine: 'underline',
   },
 });

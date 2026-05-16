@@ -7,6 +7,7 @@ import { useFocusEffect, router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getAllItems, deleteItem, Item } from '../../src/db/itemsDB';
+import { formatCurrency } from '../../src/utils/currencyUtils';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../../src/constants/theme';
 
 export default function ItemsScreen() {
@@ -68,7 +69,7 @@ export default function ItemsScreen() {
           )}
         </View>
         <Text style={styles.itemName} numberOfLines={1}>{item.item_name}</Text>
-        <Text style={styles.itemRate}>₹{item.rate.toFixed(2)}</Text>
+        <Text style={styles.itemRate}>{formatCurrency(item.rate)}</Text>
       </View>
       <View style={styles.itemActions}>
         <TouchableOpacity
@@ -89,20 +90,31 @@ export default function ItemsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
+      <View style={styles.contentWrapper}>
+        {/* Header */}
+        <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>Items</Text>
+          <Text style={styles.headerTitle}>ORDER</Text>
           <Text style={styles.headerSub}>{items.length} items in menu</Text>
         </View>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => router.push({ pathname: '/item-form' })}
-          activeOpacity={0.85}
-        >
-          <MaterialCommunityIcons name="plus" size={22} color={Colors.textInverse} />
-          <Text style={styles.addButtonText}>Add Item</Text>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.scanButton}
+            onPress={() => router.push({ pathname: '/menu-scanner' })}
+            activeOpacity={0.85}
+          >
+            <MaterialCommunityIcons name="text-recognition" size={18} color={Colors.gold} />
+            <Text style={styles.scanButtonText}>Scan</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={() => router.push({ pathname: '/item-form' })}
+            activeOpacity={0.85}
+          >
+            <MaterialCommunityIcons name="plus" size={20} color={Colors.textInverse} />
+            <Text style={styles.addButtonText}>Add Item</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* List */}
@@ -128,12 +140,14 @@ export default function ItemsScreen() {
           showsVerticalScrollIndicator={false}
         />
       )}
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  contentWrapper: { flex: 1, maxWidth: 800, width: '100%', alignSelf: 'center' },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
@@ -143,10 +157,18 @@ const styles = StyleSheet.create({
   addButton: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: Colors.gold, borderRadius: Radius.lg,
-    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
     ...Shadows.goldGlow,
   },
-  addButtonText: { color: Colors.textInverse, fontFamily: 'Poppins-SemiBold', fontSize: 14 },
+  addButtonText: { color: Colors.textInverse, fontFamily: 'Poppins-SemiBold', fontSize: 13 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  scanButton: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderWidth: 1.5, borderColor: Colors.gold, borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    backgroundColor: Colors.goldOverlay,
+  },
+  scanButtonText: { color: Colors.gold, fontFamily: 'Poppins-SemiBold', fontSize: 13 },
   listContent: { paddingHorizontal: Spacing.lg, paddingBottom: 40 },
   itemCard: {
     flexDirection: 'row', alignItems: 'center',

@@ -48,9 +48,12 @@ export const getItemById = (id: number): Item | null => {
 
 export const generateItemCode = (): string => {
   const db = getDB();
-  const result = db.getFirstSync<{ count: number }>('SELECT COUNT(*) as count FROM items');
-  const count = (result?.count ?? 0) + 1;
-  return `ITM${String(count).padStart(4, '0')}`;
+  // Use MAX of the parsed integer from item_code to prevent conflicts if items were deleted
+  const result = db.getFirstSync<{ max_num: number }>(
+    "SELECT MAX(CAST(SUBSTR(item_code, 4) AS INTEGER)) as max_num FROM items WHERE item_code LIKE 'ITM%'"
+  );
+  const max = (result?.max_num ?? 0) + 1;
+  return `ITM${String(max).padStart(4, '0')}`;
 };
 
 export const addItem = (

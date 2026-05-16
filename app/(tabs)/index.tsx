@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  TextInput, Image, RefreshControl, ScrollView, Platform,
+  TextInput, Image, RefreshControl, ScrollView, Platform, useWindowDimensions
 } from 'react-native';
 import { useFocusEffect, router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { getAllItems, Item } from '../../src/db/itemsDB';
 import { getAllCategories, Category } from '../../src/db/categoriesDB';
 import { useCart } from '../../src/context/CartContext';
+import { formatCurrency } from '../../src/utils/currencyUtils';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../../src/constants/theme';
 
 export default function MenuScreen() {
@@ -19,6 +20,11 @@ export default function MenuScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const { addItem, getItemQuantity, updateQuantity, getTotalItems, getSubtotal } = useCart();
+  const { width } = useWindowDimensions();
+
+  // Responsive calculations
+  const numColumns = width >= 1024 ? 5 : width >= 768 ? 4 : width >= 600 ? 3 : 2;
+  const cardWidth = `${100 / numColumns - 2}%`;
 
   const loadData = useCallback(() => {
     setItems(getAllItems());
@@ -71,7 +77,7 @@ export default function MenuScreen() {
   const renderItem = ({ item }: { item: Item }) => {
     const qty = getItemQuantity(item.id);
     return (
-      <View style={styles.menuCard}>
+      <View style={[styles.menuCard, { width: cardWidth as any }]}>
         {item.image_uri ? (
           <Image source={{ uri: item.image_uri }} style={styles.itemImage} resizeMode="cover" />
         ) : (
@@ -90,7 +96,7 @@ export default function MenuScreen() {
           <Text style={styles.itemName} numberOfLines={2}>{item.item_name}</Text>
           <Text style={styles.itemCode}>{item.item_code}</Text>
           <View style={styles.cardFooter}>
-            <Text style={styles.itemPrice}>₹{item.rate.toFixed(2)}</Text>
+            <Text style={styles.itemPrice}>{formatCurrency(item.rate)}</Text>
             {qty === 0 ? (
               <TouchableOpacity
                 style={styles.addBtn}
@@ -124,8 +130,9 @@ export default function MenuScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
+      <View style={styles.contentWrapper}>
+        {/* Header */}
+        <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>Menu</Text>
           <Text style={styles.headerSub}>{items.length} items available</Text>
@@ -195,10 +202,11 @@ export default function MenuScreen() {
         </View>
       ) : (
         <FlatList
+          key={numColumns}
           data={filteredItems}
           keyExtractor={item => item.id.toString()}
           renderItem={renderItem}
-          numColumns={2}
+          numColumns={numColumns}
           columnWrapperStyle={styles.row}
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.gold} />}
@@ -216,19 +224,19 @@ export default function MenuScreen() {
             <Text style={styles.cartBarLabel}>View Cart</Text>
           </View>
           <View style={styles.cartBarRight}>
-            <Text style={styles.cartBarTotal}>₹{cartSubtotal.toFixed(2)}</Text>
+            <Text style={styles.cartBarTotal}>{formatCurrency(cartSubtotal)}</Text>
             <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textInverse} />
           </View>
         </TouchableOpacity>
       )}
+      </View>
     </SafeAreaView>
   );
 }
 
-const CARD_WIDTH = '48%';
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  contentWrapper: { flex: 1, maxWidth: 1200, width: '100%', alignSelf: 'center' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -265,9 +273,9 @@ const styles = StyleSheet.create({
   },
   categoryPillText: { ...Typography.captionMedium, fontSize: 12 },
   listContent: { paddingHorizontal: Spacing.lg, paddingBottom: 100 },
-  row: { justifyContent: 'space-between', marginBottom: Spacing.md },
+  row: { gap: Spacing.md, marginBottom: Spacing.md },
   menuCard: {
-    width: CARD_WIDTH, backgroundColor: Colors.card,
+    backgroundColor: Colors.card,
     borderRadius: Radius.lg, overflow: 'hidden',
     borderWidth: 1, borderColor: Colors.border,
     ...Shadows.card,
