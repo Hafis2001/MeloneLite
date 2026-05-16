@@ -26,8 +26,8 @@ interface ScannedItem {
 
 // A palette of distinct colors for auto-created categories
 const CAT_COLORS = [
-  '#D4A853','#E07B5A','#5A9BD4','#6DBF82','#B45AE0',
-  '#E0B45A','#5AE0D4','#E05A9B','#9BE05A','#5A6BE0',
+  '#D4A853', '#E07B5A', '#5A9BD4', '#6DBF82', '#B45AE0',
+  '#E0B45A', '#5AE0D4', '#E05A9B', '#9BE05A', '#5A6BE0',
 ];
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -90,36 +90,110 @@ export default function MenuScannerScreen() {
     return text;
   };
 
-  // ── Step 2: Parse OCR text into structured items via Pollinations ───────────
+  // ── Step 2: Parse OCR text into structured items ────────────────────────────
   const parseMenuText = async (text: string): Promise<ScannedItem[]> => {
-    const prompt = `You are a restaurant menu parser. From this OCR-scanned menu text, extract all food and drink items.
-Crucial Task: Identify the section headings (e.g., "Main Course", "Starters", "Drinks", "Rice") and assign that heading as the "category" for all items that appear under it until the next heading.
-Return ONLY a JSON array with no other text.
-Format: [{"name":"Item Name","price":0,"description":"brief or empty","category":"Heading Name"}]
-Rules:
-- price must be a plain number (strip ₹ Rs or any currency), use 0 if unclear
-- category MUST be the section heading the item belongs to. If none found, use "General".
-- Do NOT include the section headers themselves as items.
+    let aiText = '';
+    let directData: any[] | null = null;
+    let parsed: any = null;
 
-Menu text:
-${text}`;
-    const res = await fetch(`https://text.pollinations.ai/${encodeURIComponent(prompt)}`, { method: 'GET' });
-    if (!res.ok) throw new Error(`Parse HTTP ${res.status}`);
-    const raw = await res.text();
-    console.log('AI parse response:', raw.slice(0, 400));
-    const match = raw.match(/\[[\s\S]*\]/);
-    if (!match) throw new Error('No JSON array in parse response');
-    const arr = JSON.parse(match[0]);
-    return arr
-      .filter((x: any) => x?.name?.trim())
-      .map((x: any) => ({
-        id: uid(),
-        name: String(x.name || '').trim(),
-        price: String(Number(x.price) || 0),
-        description: String(x.description || '').trim(),
-        category: String(x.category || 'General').trim(),
-        removed: false,
-      }));
+    // TRY AI FIRST (STABLE GET)
+    try {
+      const truncatedText = text.slice(0, 600);
+      const url = `https://text.pollinations.ai/Return_JSON_array_for_menu_${encodeURIComponent(truncatedText)}?model=mistral`;
+      const res = await fetch(url);
+      if (res.ok) {
+        aiText = await res.text();
+      } else {
+        throw new Error('AI_OFFLINE');
+      }
+    } catch (e) {
+      console.log('Using local fallback parser...');
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      const names: string[] = [];
+      const prices: string[] = [];
+      let currentCat = 'General';
+
+      for (const line of lines) {
+        const numeric = line.replace(/[^0-9.]/g, '');
+        if (numeric.length > 0 && /^\d+(\.\d+)?$/.test(numeric) && line.length < 10) {
+          prices.push(numeric);
+        } else {
+          if (line.length > 3 && line === line.toUpperCase() && line.length < 25) {
+            currentCat = line;
+          }
+          names.push(line);
+        }
+      }
+
+      const localItems: any[] = [];
+      const limit = Math.min(names.length, prices.length);
+      for (let i = 0; i < limit; i++) {
+        localItems.push({ name: names[i], price: prices[i], category: currentCat });
+      }
+      directData = localItems;
+    }
+
+    if (directData) {
+      parsed = directData;
+    } else if (aiText) {
+      let cleaned = aiText.trim();
+      try {
+        const wrapped = JSON.parse(cleaned);
+        if (Array.isArray(wrapped)) parsed = wrapped;
+        else if (wrapped.items && Array.isArray(wrapped.items)) parsed = wrapped.items;
+        else if (wrapped.choices?.[0]?.message?.content) cleaned = wrapped.choices[0].message.content;
+      } catch (e) { }
+
+      if (!parsed) {
+        const mdMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+        const target = mdMatch ? mdMatch[1] : cleaned;
+
+        const allArrays = [];
+        let depth = 0;
+        let start = -1;
+        for (let i = 0; i < target.length; i++) {
+          if (target[i] === '[') { if (depth === 0) start = i; depth++; }
+          else if (target[i] === ']') { depth--; if (depth === 0 && start !== -1) { allArrays.push(target.slice(start, i + 1)); start = -1; } }
+        }
+
+        let jsonStr = '';
+        for (let j = 0; j < allArrays.length; j++) {
+          if (allArrays[j].indexOf('"name"') !== -1 || allArrays[j].indexOf('"item"') !== -1) {
+            jsonStr = allArrays[j]; break;
+          }
+        }
+        if (!jsonStr && allArrays.length > 0) jsonStr = allArrays[allArrays.length - 1];
+
+        if (jsonStr) {
+          try {
+            parsed = JSON.parse(jsonStr);
+          } catch (e) {
+            const fixed = jsonStr.replace(/,(\s*[\]}])/g, '$1').replace(/[\u201C\u201D]/g, '"');
+            try { parsed = JSON.parse(fixed); } catch (e2) { }
+          }
+        }
+      }
+    }
+
+    if (!parsed) throw new Error('Menu items could not be identified.');
+
+    const rawArr = Array.isArray(parsed) ? parsed : [parsed];
+    const validItems: ScannedItem[] = [];
+    for (const item of rawArr) {
+      if (item && typeof item === 'object' && (item.name || item.item)) {
+        validItems.push({
+          id: uid(),
+          name: String(item.name || item.item).trim(),
+          price: String(parseFloat(String(item.price)) || 0),
+          category: String(item.category || 'General').trim(),
+          description: String(item.description || '').trim(),
+          removed: false,
+        });
+      }
+    }
+
+    if (validItems.length === 0) throw new Error('No items found in the data.');
+    return validItems;
   };
 
   const startProcessing = async () => {
@@ -147,6 +221,7 @@ ${text}`;
 
     // Step 2: AI parse
     setProcessingMsg('Identifying items with AI…');
+    await new Promise(r => setTimeout(r, 500)); // Brief pause for stability
     try {
       const extracted = await parseMenuText(combinedText);
       if (extracted.length === 0) {
@@ -159,7 +234,7 @@ ${text}`;
       setStep('review');
     } catch (e) {
       console.error('Parse error:', e);
-      Alert.alert('AI Parse Error', 'Could not process menu. Check internet and try again.', [
+      Alert.alert('AI Parse Error', 'Could not process menu. Try with fewer pages or check internet.', [
         { text: 'Back', onPress: () => setStep('capture') },
       ]);
     }
@@ -208,20 +283,20 @@ ${text}`;
       try {
         const code = `ITM${String(nextCodeNum).padStart(4, '0')}`;
         nextCodeNum++;
-        
+
         const price = parseFloat(it.price) || 0;
         const catId = catMap[it.category?.trim()] ?? null;
         const savedId = addItem(code, it.name.trim(), price, catId, null);
         // background AI image
         const catName = it.category || '';
-        ;(async () => {
+        ; (async () => {
           try {
             const url = await generateAIImage(it.name.trim(), catName);
             if (url) {
               const saved = getItemById(savedId);
               dbUpdateItem(savedId, code, it.name.trim(), price, catId, url, saved?.is_available ?? 1);
             }
-          } catch (_) {}
+          } catch (_) { }
         })();
       } catch (e) { console.error('save error', e); }
       setImportProgress(i + 1);
@@ -235,14 +310,14 @@ ${text}`;
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.contentWrapper}>
-        <View style={styles.centered}>
-          <View style={styles.processingIcon}>
-            <ActivityIndicator size="large" color={Colors.gold} />
+          <View style={styles.centered}>
+            <View style={styles.processingIcon}>
+              <ActivityIndicator size="large" color={Colors.gold} />
+            </View>
+            <Text style={styles.procTitle}>Analyzing Menu</Text>
+            <Text style={styles.procMsg}>{processingMsg}</Text>
+            <Text style={styles.procNote}>AI is extracting items from your menu card</Text>
           </View>
-          <Text style={styles.procTitle}>Analyzing Menu</Text>
-          <Text style={styles.procMsg}>{processingMsg}</Text>
-          <Text style={styles.procNote}>AI is extracting items from your menu card</Text>
-        </View>
         </View>
       </SafeAreaView>
     );
@@ -253,30 +328,30 @@ ${text}`;
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.contentWrapper}>
-        <View style={styles.centered}>
-          {!importDone ? (
-            <>
-              <ActivityIndicator size="large" color={Colors.gold} />
-              <Text style={styles.procTitle}>Importing Items</Text>
-              <Text style={styles.procMsg}>{importProgress} of {importTotal} saved</Text>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${pct * 100}%` as any }]} />
-              </View>
-              <Text style={styles.procNote}>AI images generating in background…</Text>
-            </>
-          ) : (
-            <>
-              <View style={styles.doneCircle}>
-                <MaterialCommunityIcons name="check-bold" size={40} color={Colors.textInverse} />
-              </View>
-              <Text style={styles.procTitle}>Import Complete!</Text>
-              <Text style={styles.procMsg}>{importTotal} items added to your menu</Text>
-              <TouchableOpacity style={styles.doneBtn} onPress={() => router.back()}>
-                <Text style={styles.doneBtnText}>Go to Items →</Text>
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
+          <View style={styles.centered}>
+            {!importDone ? (
+              <>
+                <ActivityIndicator size="large" color={Colors.gold} />
+                <Text style={styles.procTitle}>Importing Items</Text>
+                <Text style={styles.procMsg}>{importProgress} of {importTotal} saved</Text>
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${pct * 100}%` as any }]} />
+                </View>
+                <Text style={styles.procNote}>AI images generating in background…</Text>
+              </>
+            ) : (
+              <>
+                <View style={styles.doneCircle}>
+                  <MaterialCommunityIcons name="check-bold" size={40} color={Colors.textInverse} />
+                </View>
+                <Text style={styles.procTitle}>Import Complete!</Text>
+                <Text style={styles.procMsg}>{importTotal} items added to your menu</Text>
+                <TouchableOpacity style={styles.doneBtn} onPress={() => router.back()}>
+                  <Text style={styles.doneBtnText}>Go to Items →</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -287,114 +362,212 @@ ${text}`;
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.contentWrapper}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => setStep('capture')}>
-            <MaterialCommunityIcons name="arrow-left" size={22} color={Colors.textPrimary} />
-          </TouchableOpacity>
-          <View style={{ flex: 1, marginLeft: Spacing.md }}>
-            <Text style={styles.headerTitle}>Review Items</Text>
-            <Text style={styles.headerSub}>
-              {active.length} to import{removed > 0 ? `, ${removed} removed` : ''}
-            </Text>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.backBtn} onPress={() => setStep('capture')}>
+              <MaterialCommunityIcons name="arrow-left" size={22} color={Colors.textPrimary} />
+            </TouchableOpacity>
+            <View style={{ flex: 1, marginLeft: Spacing.md }}>
+              <Text style={styles.headerTitle}>Review Items</Text>
+              <Text style={styles.headerSub}>
+                {active.length} to import{removed > 0 ? `, ${removed} removed` : ''}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.importBtn}
+              onPress={startImport}
+              disabled={active.length === 0}
+            >
+              <MaterialCommunityIcons name="check" size={16} color={Colors.textInverse} />
+              <Text style={styles.importBtnText}>Import {active.length}</Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity
-            style={styles.importBtn}
-            onPress={startImport}
-            disabled={active.length === 0}
-          >
-            <MaterialCommunityIcons name="check" size={16} color={Colors.textInverse} />
-            <Text style={styles.importBtnText}>Import {active.length}</Text>
-          </TouchableOpacity>
-        </View>
 
-        {/* Page thumbnails strip */}
-        <View style={styles.pageStrip}>
-          <FlatList
-            horizontal
-            data={pages}
-            keyExtractor={p => p.id}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: Spacing.lg, gap: Spacing.sm }}
-            renderItem={({ item: pg }) => (
-              <TouchableOpacity onPress={() => setPreviewUri(pg.uri)}>
-                <Image source={{ uri: pg.uri }} style={styles.pageThumbnail} />
-                <View style={styles.pageZoomBadge}>
-                  <MaterialCommunityIcons name="magnify" size={10} color={Colors.white} />
-                </View>
-              </TouchableOpacity>
-            )}
-          />
-        </View>
+          {/* Page thumbnails strip */}
+          <View style={styles.pageStrip}>
+            <FlatList
+              horizontal
+              data={pages}
+              keyExtractor={p => p.id}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: Spacing.lg, gap: Spacing.sm }}
+              renderItem={({ item: pg }) => (
+                <TouchableOpacity onPress={() => setPreviewUri(pg.uri)}>
+                  <Image source={{ uri: pg.uri }} style={styles.pageThumbnail} />
+                  <View style={styles.pageZoomBadge}>
+                    <MaterialCommunityIcons name="magnify" size={10} color={Colors.white} />
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
 
-        <View style={styles.divider} />
+          <View style={styles.divider} />
 
-        {/* Items list */}
-        <FlatList
-          data={items}
-          keyExtractor={it => it.id}
-          contentContainerStyle={styles.reviewList}
-          showsVerticalScrollIndicator={false}
-          ListHeaderComponent={
+          {/* Items list grouped by category */}
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
             <Text style={styles.reviewListHdr}>
               Tap ✕ to remove items you don't want
             </Text>
-          }
-          renderItem={({ item: it }) => (
-            <View style={[styles.reviewCard, it.removed && styles.reviewCardRemoved]}>
-              <View style={styles.reviewCardIcon}>
-                <MaterialCommunityIcons
-                  name={it.removed ? 'close' : 'food-variant'}
-                  size={20}
-                  color={it.removed ? Colors.textMuted : Colors.gold}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <TextInput
-                  style={[styles.reviewName, it.removed && styles.reviewTextRemoved]}
-                  value={it.name}
-                  onChangeText={v => editItem(it.id, 'name', v)}
-                  placeholderTextColor={Colors.textMuted}
-                  placeholder="Item name"
-                  editable={!it.removed}
-                />
-                <TextInput
-                  style={[styles.reviewCategory, it.removed && styles.reviewTextRemoved]}
-                  value={it.category}
-                  onChangeText={v => editItem(it.id, 'category', v)}
-                  placeholderTextColor={Colors.textMuted}
-                  placeholder="Category"
-                  editable={!it.removed}
-                />
-                {it.description ? (
-                  <Text style={styles.reviewDesc} numberOfLines={1}>{it.description}</Text>
-                ) : null}
-                <View style={styles.reviewPriceRow}>
-                  <Text style={styles.reviewPriceSym}>₹</Text>
-                  <TextInput
-                    style={[styles.reviewPriceInput, it.removed && styles.reviewTextRemoved]}
-                    value={it.price}
-                    onChangeText={v => editItem(it.id, 'price', v)}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                    placeholderTextColor={Colors.textMuted}
-                    editable={!it.removed}
-                  />
+
+            {Object.entries(
+              items.reduce((acc, it) => {
+                const cat = it.category || 'General';
+                if (!acc[cat]) acc[cat] = [];
+                acc[cat].push(it);
+                return acc;
+              }, {} as Record<string, ScannedItem[]>)
+            ).map(([category, catItems]) => (
+              <View key={category} style={styles.catGroup}>
+                <View style={styles.catHeader}>
+                  <MaterialCommunityIcons name="tag-outline" size={16} color={Colors.gold} />
+                  <Text style={styles.catHeaderText}>{category}</Text>
+                  <Text style={styles.catHeaderCount}>({catItems.length} items)</Text>
                 </View>
+                {catItems.map((it) => (
+                  <View key={it.id} style={[styles.reviewCard, it.removed && styles.reviewCardRemoved]}>
+                    <View style={styles.reviewCardIcon}>
+                      <MaterialCommunityIcons
+                        name={it.removed ? 'close' : 'food-variant'}
+                        size={20}
+                        color={it.removed ? Colors.textMuted : Colors.gold}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <TextInput
+                        style={[styles.reviewName, it.removed && styles.reviewTextRemoved]}
+                        value={it.name}
+                        onChangeText={v => editItem(it.id, 'name', v)}
+                        placeholderTextColor={Colors.textMuted}
+                        placeholder="Item name"
+                        editable={!it.removed}
+                      />
+                      <TextInput
+                        style={[styles.reviewCategory, it.removed && styles.reviewTextRemoved]}
+                        value={it.category}
+                        onChangeText={v => editItem(it.id, 'category', v)}
+                        placeholderTextColor={Colors.textMuted}
+                        placeholder="Category"
+                        editable={!it.removed}
+                      />
+                      <View style={styles.reviewPriceRow}>
+                        <Text style={styles.reviewPriceSym}>₹</Text>
+                        <TextInput
+                          style={[styles.reviewPriceInput, it.removed && styles.reviewTextRemoved]}
+                          value={it.price}
+                          onChangeText={v => editItem(it.id, 'price', v)}
+                          keyboardType="decimal-pad"
+                          placeholder="0.00"
+                          placeholderTextColor={Colors.textMuted}
+                          editable={!it.removed}
+                        />
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.removeBtn, it.removed && styles.restoreBtn]}
+                      onPress={() => toggleRemove(it.id)}
+                    >
+                      <MaterialCommunityIcons
+                        name={it.removed ? 'restore' : 'close'}
+                        size={16}
+                        color={it.removed ? Colors.success : Colors.error}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                ))}
               </View>
-              <TouchableOpacity
-                style={[styles.removeBtn, it.removed && styles.restoreBtn]}
-                onPress={() => toggleRemove(it.id)}
-              >
-                <MaterialCommunityIcons
-                  name={it.removed ? 'restore' : 'close'}
-                  size={16}
-                  color={it.removed ? Colors.success : Colors.error}
-                />
+            ))}
+            <View style={{ height: 40 }} />
+          </ScrollView>
+
+          {/* Full-page preview modal */}
+          <Modal visible={!!previewUri} transparent animationType="fade" onRequestClose={() => setPreviewUri(null)}>
+            <View style={styles.modalOverlay}>
+              <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setPreviewUri(null)} />
+              {previewUri && (
+                <Image source={{ uri: previewUri }} style={styles.previewFull} resizeMode="contain" />
+              )}
+              <TouchableOpacity style={styles.closeModalBtn} onPress={() => setPreviewUri(null)}>
+                <MaterialCommunityIcons name="close" size={20} color={Colors.white} />
               </TouchableOpacity>
             </View>
+          </Modal>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ── Capture Step ─────────────────────────────────────────────────────
+  return (
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <View style={styles.contentWrapper}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <MaterialCommunityIcons name="arrow-left" size={22} color={Colors.textPrimary} />
+          </TouchableOpacity>
+          <View style={{ flex: 1, marginLeft: Spacing.md }}>
+            <Text style={styles.headerTitle}>Scan Menu Card</Text>
+            <Text style={styles.headerSub}>Add one or more menu pages</Text>
+          </View>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.captureScroll} showsVerticalScrollIndicator={false}>
+          {/* Captured pages grid */}
+          {pages.length > 0 ? (
+            <View style={styles.pagesGrid}>
+              {pages.map(pg => (
+                <View key={pg.id} style={styles.pageCard}>
+                  <TouchableOpacity onPress={() => setPreviewUri(pg.uri)}>
+                    <Image source={{ uri: pg.uri }} style={styles.pageCardImg} />
+                    <View style={styles.pageZoomOverlay}>
+                      <MaterialCommunityIcons name="magnify-plus-outline" size={22} color={Colors.white} />
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.pageDeleteBtn} onPress={() => setPages(p => p.filter(x => x.id !== pg.id))}>
+                    <MaterialCommunityIcons name="close" size={12} color={Colors.white} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.emptyCapture}>
+              <MaterialCommunityIcons name="camera-document" size={72} color={Colors.textMuted} />
+              <Text style={styles.emptyCaptureTitle}>No pages added yet</Text>
+              <Text style={styles.emptyCaptureText}>
+                Take a photo of each menu card page.{'\n'}Multiple pages are supported.
+              </Text>
+            </View>
           )}
-        />
+
+          {/* Add buttons */}
+          <View style={styles.captureBtns}>
+            <TouchableOpacity style={styles.captureBtn} onPress={addFromCamera}>
+              <MaterialCommunityIcons name="camera" size={24} color={Colors.gold} />
+              <Text style={styles.captureBtnText}>Camera</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.captureBtn} onPress={addFromGallery}>
+              <MaterialCommunityIcons name="image-multiple" size={24} color={Colors.gold} />
+              <Text style={styles.captureBtnText}>Gallery</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Menu text input */}
+          <View style={styles.infoCard}>
+            <MaterialCommunityIcons name="information-outline" size={18} color={Colors.gold} />
+            <Text style={styles.infoText}>
+              AI will automatically read text from your photos and extract all menu items with prices.
+            </Text>
+          </View>
+
+          {pages.length > 0 && (
+            <TouchableOpacity style={styles.analyzeBtn} onPress={startProcessing}>
+              <MaterialCommunityIcons name="text-recognition" size={20} color={Colors.textInverse} />
+              <Text style={styles.analyzeBtnText}>
+                Scan {pages.length} Page{pages.length > 1 ? 's' : ''} →
+              </Text>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
 
         {/* Full-page preview modal */}
         <Modal visible={!!previewUri} transparent animationType="fade" onRequestClose={() => setPreviewUri(null)}>
@@ -408,95 +581,6 @@ ${text}`;
             </TouchableOpacity>
           </View>
         </Modal>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ── Capture Step ─────────────────────────────────────────────────────
-  return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.contentWrapper}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <MaterialCommunityIcons name="arrow-left" size={22} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <View style={{ flex: 1, marginLeft: Spacing.md }}>
-          <Text style={styles.headerTitle}>Scan Menu Card</Text>
-          <Text style={styles.headerSub}>Add one or more menu pages</Text>
-        </View>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.captureScroll} showsVerticalScrollIndicator={false}>
-        {/* Captured pages grid */}
-        {pages.length > 0 ? (
-          <View style={styles.pagesGrid}>
-            {pages.map(pg => (
-              <View key={pg.id} style={styles.pageCard}>
-                <TouchableOpacity onPress={() => setPreviewUri(pg.uri)}>
-                  <Image source={{ uri: pg.uri }} style={styles.pageCardImg} />
-                  <View style={styles.pageZoomOverlay}>
-                    <MaterialCommunityIcons name="magnify-plus-outline" size={22} color={Colors.white} />
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.pageDeleteBtn} onPress={() => setPages(p => p.filter(x => x.id !== pg.id))}>
-                  <MaterialCommunityIcons name="close" size={12} color={Colors.white} />
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <View style={styles.emptyCapture}>
-            <MaterialCommunityIcons name="camera-document" size={72} color={Colors.textMuted} />
-            <Text style={styles.emptyCaptureTitle}>No pages added yet</Text>
-            <Text style={styles.emptyCaptureText}>
-              Take a photo of each menu card page.{'\n'}Multiple pages are supported.
-            </Text>
-          </View>
-        )}
-
-        {/* Add buttons */}
-        <View style={styles.captureBtns}>
-          <TouchableOpacity style={styles.captureBtn} onPress={addFromCamera}>
-            <MaterialCommunityIcons name="camera" size={24} color={Colors.gold} />
-            <Text style={styles.captureBtnText}>Camera</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.captureBtn} onPress={addFromGallery}>
-            <MaterialCommunityIcons name="image-multiple" size={24} color={Colors.gold} />
-            <Text style={styles.captureBtnText}>Gallery</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Menu text input */}
-        <View style={styles.infoCard}>
-          <MaterialCommunityIcons name="information-outline" size={18} color={Colors.gold} />
-          <Text style={styles.infoText}>
-            AI will automatically read text from your photos and extract all menu items with prices.
-          </Text>
-        </View>
-
-        {pages.length > 0 && (
-          <TouchableOpacity style={styles.analyzeBtn} onPress={startProcessing}>
-            <MaterialCommunityIcons name="text-recognition" size={20} color={Colors.textInverse} />
-            <Text style={styles.analyzeBtnText}>
-              Scan {pages.length} Page{pages.length > 1 ? 's' : ''} →
-            </Text>
-          </TouchableOpacity>
-        )}
-      </ScrollView>
-
-      {/* Full-page preview modal */}
-      <Modal visible={!!previewUri} transparent animationType="fade" onRequestClose={() => setPreviewUri(null)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setPreviewUri(null)} />
-          {previewUri && (
-            <Image source={{ uri: previewUri }} style={styles.previewFull} resizeMode="contain" />
-          )}
-          <TouchableOpacity style={styles.closeModalBtn} onPress={() => setPreviewUri(null)}>
-            <MaterialCommunityIcons name="close" size={20} color={Colors.white} />
-          </TouchableOpacity>
-        </View>
-      </Modal>
       </View>
     </SafeAreaView>
   );
@@ -654,4 +738,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center', justifyContent: 'center',
   },
+
+  // Category Grouping
+  catGroup: { marginBottom: Spacing.xl, paddingHorizontal: Spacing.lg },
+  catHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
+    marginBottom: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.gold + '20',
+    paddingBottom: 4,
+  },
+  catHeaderText: { ...Typography.bodyBold, color: Colors.textPrimary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  catHeaderCount: { ...Typography.caption, color: Colors.textMuted, marginLeft: 4 },
 });
