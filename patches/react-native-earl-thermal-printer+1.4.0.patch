@@ -1,0 +1,597 @@
+diff --git a/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/BLEPrinterAdapter.java b/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/BLEPrinterAdapter.java
+index 28c4a23..7a6b04f 100644
+--- a/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/BLEPrinterAdapter.java
++++ b/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/BLEPrinterAdapter.java
+@@ -192,6 +192,64 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+     }
+ 
+     public static Bitmap getBitmapFromURL(String src) {
++        if (src == null || src.isEmpty()) {
++            return null;
++        }
++
++        // 1. Check if it's a Base64 image string
++        if (src.startsWith("data:image/") && src.contains(";base64,")) {
++            try {
++                String base64Content = src.substring(src.indexOf(";base64,") + 8);
++                byte[] decodedString = Base64.decode(base64Content, Base64.DEFAULT);
++                return BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
++            } catch (Exception e) {
++                e.printStackTrace();
++            }
++        }
++
++        // 2. Check if it's a pure base64 string
++        if (src.length() > 100 && !src.startsWith("http") && !src.startsWith("file") && !src.startsWith("content")) {
++            try {
++                byte[] decodedString = Base64.decode(src, Base64.DEFAULT);
++                Bitmap bitmap = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
++                if (bitmap != null) {
++                    return bitmap;
++                }
++            } catch (Exception e) {
++                // Ignore and fall through
++            }
++        }
++
++        // 3. Check if it's a local file URI (Direct Path Fallback)
++        if (src.startsWith("file://")) {
++            try {
++                String path = src.substring(7);
++                Bitmap bitmap = BitmapFactory.decodeFile(path);
++                if (bitmap != null) {
++                    return bitmap;
++                }
++            } catch (Exception e) {
++                e.printStackTrace();
++            }
++        }
++
++        // 4. Check if it's a content or file URI using ContentResolver
++        if (src.startsWith("file://") || src.startsWith("content://")) {
++            try {
++                if (mInstance != null && mInstance.mContext != null) {
++                    InputStream input = mInstance.mContext.getContentResolver().openInputStream(android.net.Uri.parse(src));
++                    Bitmap myBitmap = BitmapFactory.decodeStream(input);
++                    if (input != null) {
++                        input.close();
++                    }
++                    return myBitmap;
++                }
++            } catch (Exception e) {
++                e.printStackTrace();
++            }
++        }
++
++        // 5. Fallback to web URL download
+         try {
+             URL url = new URL(src);
+             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+@@ -199,24 +257,107 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+             connection.connect();
+             InputStream input = connection.getInputStream();
+             Bitmap myBitmap = BitmapFactory.decodeStream(input);
+-
+-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+-            myBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos);
+-
++            if (input != null) {
++                input.close();
++            }
+             return myBitmap;
+         } catch (IOException e) {
++            e.printStackTrace();
+             return null;
+         }
+     }
+ 
++    public static Bitmap trimBitmap(Bitmap source) {
++        if (source == null) return null;
++        int width = source.getWidth();
++        int height = source.getHeight();
++        int firstY = 0;
++        int lastY = height - 1;
++        int firstX = 0;
++        int lastX = width - 1;
++
++        // Find first non-empty pixel row (from top)
++        for (int y = 0; y < height; y++) {
++            boolean rowIsEmpty = true;
++            for (int x = 0; x < width; x++) {
++                int pixel = source.getPixel(x, y);
++                if (shouldPrintColor(pixel)) {
++                    rowIsEmpty = false;
++                    break;
++                }
++            }
++            if (!rowIsEmpty) {
++                firstY = y;
++                break;
++            }
++        }
++
++        // Find last non-empty pixel row (from bottom)
++        for (int y = height - 1; y >= firstY; y--) {
++            boolean rowIsEmpty = true;
++            for (int x = 0; x < width; x++) {
++                int pixel = source.getPixel(x, y);
++                if (shouldPrintColor(pixel)) {
++                    rowIsEmpty = false;
++                    break;
++                }
++            }
++            if (!rowIsEmpty) {
++                lastY = y;
++                break;
++            }
++        }
++
++        // Find first non-empty pixel column (from left)
++        for (int x = 0; x < width; x++) {
++            boolean colIsEmpty = true;
++            for (int y = firstY; y <= lastY; y++) {
++                int pixel = source.getPixel(x, y);
++                if (shouldPrintColor(pixel)) {
++                    colIsEmpty = false;
++                    break;
++                }
++            }
++            if (!colIsEmpty) {
++                firstX = x;
++                break;
++            }
++        }
++
++        // Find last non-empty pixel column (from right)
++        for (int x = width - 1; x >= firstX; x--) {
++            boolean colIsEmpty = true;
++            for (int y = firstY; y <= lastY; y++) {
++                int pixel = source.getPixel(x, y);
++                if (shouldPrintColor(pixel)) {
++                    colIsEmpty = false;
++                    break;
++                }
++            }
++            if (!colIsEmpty) {
++                lastX = x;
++                break;
++            }
++        }
++
++        int newWidth = lastX - firstX + 1;
++        int newHeight = lastY - firstY + 1;
++        if (newWidth <= 0 || newHeight <= 0) {
++            return source;
++        }
++
++        return Bitmap.createBitmap(source, firstX, firstY, newWidth, newHeight);
++    }
++
+     @Override
+     public void printImageData(String imageUrl, double imageWidth, Promise promise) {
+-        final Bitmap bitmapImage = getBitmapFromURL(imageUrl);
++        Bitmap bitmapImage = getBitmapFromURL(imageUrl);
+ 
+         if (bitmapImage == null) {
+             promise.reject("ERR_IMAGE", "image not found");
+             return;
+         }
++        bitmapImage = trimBitmap(bitmapImage);
+         if (this.mBluetoothSocket == null) {
+             promise.reject("ERR_NO_CONN", "Bluetooth connection is not built, may be you forgot to connectPrinter");
+             return;
+@@ -242,7 +383,6 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+                 printerOutputStream.write(LINE_FEED);
+             }
+             printerOutputStream.write(SET_LINE_SPACE_32);
+-            printerOutputStream.write(LINE_FEED);
+             printerOutputStream.flush();
+             promise.resolve(null);
+         } catch (IOException e) {
+@@ -347,7 +487,7 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+         return slices;
+     }
+ 
+-    private boolean shouldPrintColor(int col) {
++    public static boolean shouldPrintColor(int col) {
+         final int threshold = 127;
+         int a, r, g, b, luminance;
+         a = (col >> 24) & 0xff;
+diff --git a/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/NetPrinterAdapter.java b/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/NetPrinterAdapter.java
+index ff51b03..ad46e43 100644
+--- a/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/NetPrinterAdapter.java
++++ b/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/NetPrinterAdapter.java
+@@ -232,6 +232,64 @@ public class NetPrinterAdapter implements PrinterAdapter {
+     }
+ 
+     public static Bitmap getBitmapFromURL(String src) {
++        if (src == null || src.isEmpty()) {
++            return null;
++        }
++
++        // 1. Check if it's a Base64 image string
++        if (src.startsWith("data:image/") && src.contains(";base64,")) {
++            try {
++                String base64Content = src.substring(src.indexOf(";base64,") + 8);
++                byte[] decodedString = Base64.decode(base64Content, Base64.DEFAULT);
++                return BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
++            } catch (Exception e) {
++                e.printStackTrace();
++            }
++        }
++
++        // 2. Check if it's a pure base64 string
++        if (src.length() > 100 && !src.startsWith("http") && !src.startsWith("file") && !src.startsWith("content")) {
++            try {
++                byte[] decodedString = Base64.decode(src, Base64.DEFAULT);
++                Bitmap bitmap = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
++                if (bitmap != null) {
++                    return bitmap;
++                }
++            } catch (Exception e) {
++                // Ignore and fall through
++            }
++        }
++
++        // 3. Check if it's a local file URI (Direct Path Fallback)
++        if (src.startsWith("file://")) {
++            try {
++                String path = src.substring(7);
++                Bitmap bitmap = BitmapFactory.decodeFile(path);
++                if (bitmap != null) {
++                    return bitmap;
++                }
++            } catch (Exception e) {
++                e.printStackTrace();
++            }
++        }
++
++        // 4. Check if it's a content or file URI using ContentResolver
++        if (src.startsWith("file://") || src.startsWith("content://")) {
++            try {
++                if (mInstance != null && mInstance.mContext != null) {
++                    InputStream input = mInstance.mContext.getContentResolver().openInputStream(android.net.Uri.parse(src));
++                    Bitmap myBitmap = BitmapFactory.decodeStream(input);
++                    if (input != null) {
++                        input.close();
++                    }
++                    return myBitmap;
++                }
++            } catch (Exception e) {
++                e.printStackTrace();
++            }
++        }
++
++        // 5. Fallback to web URL download
+         try {
+             URL url = new URL(src);
+             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+@@ -239,24 +297,107 @@ public class NetPrinterAdapter implements PrinterAdapter {
+             connection.connect();
+             InputStream input = connection.getInputStream();
+             Bitmap myBitmap = BitmapFactory.decodeStream(input);
+-
+-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+-            myBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos);
+-
++            if (input != null) {
++                input.close();
++            }
+             return myBitmap;
+         } catch (IOException e) {
++            e.printStackTrace();
+             return null;
+         }
+     }
+ 
++    public static Bitmap trimBitmap(Bitmap source) {
++        if (source == null) return null;
++        int width = source.getWidth();
++        int height = source.getHeight();
++        int firstY = 0;
++        int lastY = height - 1;
++        int firstX = 0;
++        int lastX = width - 1;
++
++        // Find first non-empty pixel row (from top)
++        for (int y = 0; y < height; y++) {
++            boolean rowIsEmpty = true;
++            for (int x = 0; x < width; x++) {
++                int pixel = source.getPixel(x, y);
++                if (shouldPrintColor(pixel)) {
++                    rowIsEmpty = false;
++                    break;
++                }
++            }
++            if (!rowIsEmpty) {
++                firstY = y;
++                break;
++            }
++        }
++
++        // Find last non-empty pixel row (from bottom)
++        for (int y = height - 1; y >= firstY; y--) {
++            boolean rowIsEmpty = true;
++            for (int x = 0; x < width; x++) {
++                int pixel = source.getPixel(x, y);
++                if (shouldPrintColor(pixel)) {
++                    rowIsEmpty = false;
++                    break;
++                }
++            }
++            if (!rowIsEmpty) {
++                lastY = y;
++                break;
++            }
++        }
++
++        // Find first non-empty pixel column (from left)
++        for (int x = 0; x < width; x++) {
++            boolean colIsEmpty = true;
++            for (int y = firstY; y <= lastY; y++) {
++                int pixel = source.getPixel(x, y);
++                if (shouldPrintColor(pixel)) {
++                    colIsEmpty = false;
++                    break;
++                }
++            }
++            if (!colIsEmpty) {
++                firstX = x;
++                break;
++            }
++        }
++
++        // Find last non-empty pixel column (from right)
++        for (int x = width - 1; x >= firstX; x--) {
++            boolean colIsEmpty = true;
++            for (int y = firstY; y <= lastY; y++) {
++                int pixel = source.getPixel(x, y);
++                if (shouldPrintColor(pixel)) {
++                    colIsEmpty = false;
++                    break;
++                }
++            }
++            if (!colIsEmpty) {
++                lastX = x;
++                break;
++            }
++        }
++
++        int newWidth = lastX - firstX + 1;
++        int newHeight = lastY - firstY + 1;
++        if (newWidth <= 0 || newHeight <= 0) {
++            return source;
++        }
++
++        return Bitmap.createBitmap(source, firstX, firstY, newWidth, newHeight);
++    }
++
+     @Override
+     public void printImageData(final String imageUrl, double imageWidth, Promise promise) {
+-        final Bitmap bitmapImage = getBitmapFromURL(imageUrl);
++        Bitmap bitmapImage = getBitmapFromURL(imageUrl);
+ 
+         if (bitmapImage == null) {
+             promise.reject("ERR_IMAGE", "image not found");
+             return;
+         }
++        bitmapImage = trimBitmap(bitmapImage);
+ 
+         if (this.mSocket == null) {
+             promise.reject("ERR_NO_CONN", "Connection is not built, may be you forgot to connectPrinter");
+@@ -283,7 +424,6 @@ public class NetPrinterAdapter implements PrinterAdapter {
+                 printerOutputStream.write(LINE_FEED);
+             }
+             printerOutputStream.write(SET_LINE_SPACE_32);
+-            printerOutputStream.write(LINE_FEED);
+             printerOutputStream.flush();
+             promise.resolve(null);
+         } catch (IOException e) {
+@@ -389,7 +529,7 @@ public class NetPrinterAdapter implements PrinterAdapter {
+         return slices;
+     }
+ 
+-    private boolean shouldPrintColor(int col) {
++    public static boolean shouldPrintColor(int col) {
+         final int threshold = 127;
+         int a, r, g, b, luminance;
+         a = (col >> 24) & 0xff;
+diff --git a/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/USBPrinterAdapter.java b/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/USBPrinterAdapter.java
+index b434580..cabb0db 100644
+--- a/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/USBPrinterAdapter.java
++++ b/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/USBPrinterAdapter.java
+@@ -257,6 +257,64 @@ public class USBPrinterAdapter implements PrinterAdapter {
+     }
+ 
+     public static Bitmap getBitmapFromURL(String src) {
++        if (src == null || src.isEmpty()) {
++            return null;
++        }
++
++        // 1. Check if it's a Base64 image string
++        if (src.startsWith("data:image/") && src.contains(";base64,")) {
++            try {
++                String base64Content = src.substring(src.indexOf(";base64,") + 8);
++                byte[] decodedString = Base64.decode(base64Content, Base64.DEFAULT);
++                return BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
++            } catch (Exception e) {
++                e.printStackTrace();
++            }
++        }
++
++        // 2. Check if it's a pure base64 string
++        if (src.length() > 100 && !src.startsWith("http") && !src.startsWith("file") && !src.startsWith("content")) {
++            try {
++                byte[] decodedString = Base64.decode(src, Base64.DEFAULT);
++                Bitmap bitmap = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
++                if (bitmap != null) {
++                    return bitmap;
++                }
++            } catch (Exception e) {
++                // Ignore and fall through
++            }
++        }
++
++        // 3. Check if it's a local file URI (Direct Path Fallback)
++        if (src.startsWith("file://")) {
++            try {
++                String path = src.substring(7);
++                Bitmap bitmap = BitmapFactory.decodeFile(path);
++                if (bitmap != null) {
++                    return bitmap;
++                }
++            } catch (Exception e) {
++                e.printStackTrace();
++            }
++        }
++
++        // 4. Check if it's a content or file URI using ContentResolver
++        if (src.startsWith("file://") || src.startsWith("content://")) {
++            try {
++                if (mInstance != null && mInstance.mContext != null) {
++                    InputStream input = mInstance.mContext.getContentResolver().openInputStream(android.net.Uri.parse(src));
++                    Bitmap myBitmap = BitmapFactory.decodeStream(input);
++                    if (input != null) {
++                        input.close();
++                    }
++                    return myBitmap;
++                }
++            } catch (Exception e) {
++                e.printStackTrace();
++            }
++        }
++
++        // 5. Fallback to web URL download
+         try {
+             URL url = new URL(src);
+             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+@@ -264,24 +322,107 @@ public class USBPrinterAdapter implements PrinterAdapter {
+             connection.connect();
+             InputStream input = connection.getInputStream();
+             Bitmap myBitmap = BitmapFactory.decodeStream(input);
+-
+-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+-            myBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos);
+-
++            if (input != null) {
++                input.close();
++            }
+             return myBitmap;
+         } catch (IOException e) {
++            e.printStackTrace();
+             return null;
+         }
+     }
+ 
++    public static Bitmap trimBitmap(Bitmap source) {
++        if (source == null) return null;
++        int width = source.getWidth();
++        int height = source.getHeight();
++        int firstY = 0;
++        int lastY = height - 1;
++        int firstX = 0;
++        int lastX = width - 1;
++
++        // Find first non-empty pixel row (from top)
++        for (int y = 0; y < height; y++) {
++            boolean rowIsEmpty = true;
++            for (int x = 0; x < width; x++) {
++                int pixel = source.getPixel(x, y);
++                if (shouldPrintColor(pixel)) {
++                    rowIsEmpty = false;
++                    break;
++                }
++            }
++            if (!rowIsEmpty) {
++                firstY = y;
++                break;
++            }
++        }
++
++        // Find last non-empty pixel row (from bottom)
++        for (int y = height - 1; y >= firstY; y--) {
++            boolean rowIsEmpty = true;
++            for (int x = 0; x < width; x++) {
++                int pixel = source.getPixel(x, y);
++                if (shouldPrintColor(pixel)) {
++                    rowIsEmpty = false;
++                    break;
++                }
++            }
++            if (!rowIsEmpty) {
++                lastY = y;
++                break;
++            }
++        }
++
++        // Find first non-empty pixel column (from left)
++        for (int x = 0; x < width; x++) {
++            boolean colIsEmpty = true;
++            for (int y = firstY; y <= lastY; y++) {
++                int pixel = source.getPixel(x, y);
++                if (shouldPrintColor(pixel)) {
++                    colIsEmpty = false;
++                    break;
++                }
++            }
++            if (!colIsEmpty) {
++                firstX = x;
++                break;
++            }
++        }
++
++        // Find last non-empty pixel column (from right)
++        for (int x = width - 1; x >= firstX; x--) {
++            boolean colIsEmpty = true;
++            for (int y = firstY; y <= lastY; y++) {
++                int pixel = source.getPixel(x, y);
++                if (shouldPrintColor(pixel)) {
++                    colIsEmpty = false;
++                    break;
++                }
++            }
++            if (!colIsEmpty) {
++                lastX = x;
++                break;
++            }
++        }
++
++        int newWidth = lastX - firstX + 1;
++        int newHeight = lastY - firstY + 1;
++        if (newWidth <= 0 || newHeight <= 0) {
++            return source;
++        }
++
++        return Bitmap.createBitmap(source, firstX, firstY, newWidth, newHeight);
++    }
++
+     @Override
+     public void printImageData(final String imageUrl, double imageWidth, Promise promise) {
+-        final Bitmap bitmapImage = getBitmapFromURL(imageUrl);
++        Bitmap bitmapImage = getBitmapFromURL(imageUrl);
+ 
+         if (bitmapImage == null) {
+             promise.reject("ERR_IMAGE", "image not found");
+             return;
+         }
++        bitmapImage = trimBitmap(bitmapImage);
+ 
+         Log.v(LOG_TAG, "start to print image data " + bitmapImage);
+         boolean isConnected = openConnection();
+@@ -311,7 +452,6 @@ public class USBPrinterAdapter implements PrinterAdapter {
+                 }
+ 
+                 mUsbDeviceConnection.bulkTransfer(mEndPoint, SET_LINE_SPACE_32, SET_LINE_SPACE_32.length, 100000);
+-                mUsbDeviceConnection.bulkTransfer(mEndPoint, LINE_FEED, LINE_FEED.length, 100000);
+                 promise.resolve(null);
+             } catch (Exception e) {
+                 promise.reject("ERR_PRINT_IMAGE", e.getMessage());
+@@ -424,7 +564,7 @@ public class USBPrinterAdapter implements PrinterAdapter {
+         return slices;
+     }
+ 
+-    private boolean shouldPrintColor(int col) {
++    public static boolean shouldPrintColor(int col) {
+         final int threshold = 127;
+         int a, r, g, b, luminance;
+         a = (col >> 24) & 0xff;

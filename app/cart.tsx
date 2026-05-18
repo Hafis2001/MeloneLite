@@ -7,8 +7,10 @@ import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCart } from '../src/context/CartContext';
-import { placeOrder } from '../src/db/ordersDB';
-import { getSetting } from '../src/db/settingsDB';
+import { placeOrder, getOrderById, incrementPrintCount } from '../src/db/ordersDB';
+import { getSetting, getAllSettings } from '../src/db/settingsDB';
+import { printReceipt } from '../src/utils/printUtils';
+import printerService from '../src/services/printerService';
 import { formatCurrency } from '../src/utils/currencyUtils';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../src/constants/theme';
 
@@ -30,6 +32,43 @@ export default function CartScreen() {
   const discountAmt = Math.max(0, Math.min(state.discount, subtotal));
   const grandTotal = parseFloat((subtotal - discountAmt).toFixed(2));
 
+  const handleDirectPrint = async (orderId: number) => {
+    const full = getOrderById(orderId);
+    if (!full || !full.items) return;
+    const settings = getAllSettings();
+
+    if (!printerService.connected && !printerService.currentPrinter) {
+      Alert.alert(
+        "Printer Not Connected",
+        "You haven't selected a Bluetooth printer yet. Would you like to go to Settings or use standard PDF print?",
+        [
+          { text: "Go to Settings", onPress: () => { router.dismiss(); router.push('/settings'); } },
+          { 
+            text: "Standard Print", 
+            onPress: async () => {
+              try {
+                await printReceipt(full, full.items, settings);
+              } catch (e: any) {
+                Alert.alert('Print Error', e.message);
+              }
+            } 
+          },
+          { text: "Cancel", style: "cancel" }
+        ]
+      );
+      return;
+    }
+
+    try {
+      const success = await printReceipt(full, full.items, settings);
+      if (success) {
+        incrementPrintCount(orderId);
+      }
+    } catch (e: any) {
+      Alert.alert('Print Error', e?.message ?? 'Could not print');
+    }
+  };
+
   const handlePlaceOrder = async () => {
     if (state.items.length === 0) {
       Alert.alert('Empty Cart', 'Add items to cart before placing order');
@@ -45,7 +84,7 @@ export default function CartScreen() {
         quantity: ci.quantity,
         subtotal: parseFloat((ci.item.rate * ci.quantity).toFixed(2)),
       }));
-      placeOrder(
+      const orderId = placeOrder(
         {
           customer_name: state.customerName,
           table_no: state.tableNo,
@@ -64,8 +103,25 @@ export default function CartScreen() {
       );
       clearCart();
       Alert.alert('Order Placed! 🎉', `Grand Total: ${formatCurrency(grandTotal)}`, [
-        { text: 'View Orders', onPress: () => { router.dismiss(); router.push('/(tabs)/orders'); } },
-        { text: 'OK', onPress: () => router.dismiss() },
+        { 
+          text: 'Print Receipt', 
+          onPress: async () => {
+            router.dismiss();
+            await handleDirectPrint(orderId);
+          }
+        },
+        { 
+          text: 'View Orders', 
+          onPress: () => { 
+            router.dismiss(); 
+            router.push('/(tabs)/orders'); 
+          } 
+        },
+        { 
+          text: 'OK', 
+          onPress: () => router.dismiss(),
+          style: 'cancel'
+        },
       ]);
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Could not place order');

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, Image, KeyboardAvoidingView, Platform,
+  Modal, TouchableWithoutFeedback,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -23,6 +24,7 @@ export default function ItemFormScreen() {
   const [itemName, setItemName] = useState('');
   const [rate, setRate] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageModalVisible, setImageModalVisible] = useState(false);
   const [categoryId, setCategoryId] = useState<number | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryDropdown, setCategoryDropdown] = useState(false);
@@ -59,33 +61,8 @@ export default function ItemFormScreen() {
     }
   }, [id]);
 
-  const pickImage = async () => {
-    Alert.alert('Select Image', 'Choose source', [
-      {
-        text: 'Camera', onPress: async () => {
-          const { status } = await ImagePicker.requestCameraPermissionsAsync();
-          if (status !== 'granted') { Alert.alert('Permission needed'); return; }
-          const result = await ImagePicker.launchCameraAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true, aspect: [1, 1], quality: 0.7,
-          });
-          if (!result.canceled) setImageUri(result.assets[0].uri);
-        },
-      },
-      {
-        text: 'Gallery', onPress: async () => {
-          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (status !== 'granted') { Alert.alert('Permission needed'); return; }
-          const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true, aspect: [1, 1], quality: 0.7,
-          });
-          if (!result.canceled) setImageUri(result.assets[0].uri);
-        },
-      },
-      { text: 'Remove Image', onPress: () => setImageUri(null), style: 'destructive' },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+  const pickImage = () => {
+    setImageModalVisible(true);
   };
 
   const handleSave = async () => {
@@ -280,6 +257,94 @@ export default function ItemFormScreen() {
             <Text style={styles.saveBtnText}>{saving ? 'Saving...' : isEdit ? 'Save Changes' : 'Add Item'}</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Custom Image Source Picker Modal */}
+        <Modal
+          visible={imageModalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setImageModalVisible(false)}
+        >
+          <TouchableWithoutFeedback onPress={() => setImageModalVisible(false)}>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback>
+                <View style={styles.modalContainer}>
+                  {/* Header */}
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>Select Item Image</Text>
+                    <TouchableOpacity onPress={() => setImageModalVisible(false)}>
+                      <MaterialCommunityIcons name="close" size={24} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Options */}
+                  <View style={styles.modalOptions}>
+                    <TouchableOpacity
+                      style={styles.modalOptionBtn}
+                      onPress={async () => {
+                        setImageModalVisible(false);
+                        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+                        if (status !== 'granted') { Alert.alert('Permission needed', 'Allow camera access in settings.'); return; }
+                        const result = await ImagePicker.launchCameraAsync({
+                          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                          allowsEditing: true, aspect: [1, 1], quality: 0.7,
+                        });
+                        if (!result.canceled) setImageUri(result.assets[0].uri);
+                      }}
+                    >
+                      <View style={styles.modalOptionIconBg}>
+                        <MaterialCommunityIcons name="camera" size={22} color={Colors.gold} />
+                      </View>
+                      <Text style={styles.modalOptionText}>Take Photo</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.modalOptionBtn}
+                      onPress={async () => {
+                        setImageModalVisible(false);
+                        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                        if (status !== 'granted') { Alert.alert('Permission needed', 'Allow gallery access in settings.'); return; }
+                        const result = await ImagePicker.launchImageLibraryAsync({
+                          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                          allowsEditing: true, aspect: [1, 1], quality: 0.7,
+                        });
+                        if (!result.canceled) setImageUri(result.assets[0].uri);
+                      }}
+                    >
+                      <View style={styles.modalOptionIconBg}>
+                        <MaterialCommunityIcons name="image" size={22} color={Colors.gold} />
+                      </View>
+                      <Text style={styles.modalOptionText}>Choose from Gallery</Text>
+                    </TouchableOpacity>
+
+                    {imageUri && (
+                      <TouchableOpacity
+                        style={[styles.modalOptionBtn, styles.modalOptionBtnDestructive]}
+                        onPress={() => {
+                          setImageModalVisible(false);
+                          setImageUri(null);
+                        }}
+                      >
+                        <View style={[styles.modalOptionIconBg, { backgroundColor: Colors.errorBg }]}>
+                          <MaterialCommunityIcons name="trash-can-outline" size={22} color={Colors.error} />
+                        </View>
+                        <Text style={[styles.modalOptionText, { color: Colors.error }]}>Remove Photo</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Cancel Button */}
+                  <TouchableOpacity
+                    style={styles.modalCancelBtn}
+                    onPress={() => setImageModalVisible(false)}
+                  >
+                    <Text style={styles.modalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -357,4 +422,77 @@ const styles = StyleSheet.create({
     marginTop: 12, gap: 6,
   },
   aiTriggerText: { color: Colors.textInverse, fontFamily: 'Poppins-Medium', fontSize: 12 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: Colors.cardElevated,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.card,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    marginBottom: Spacing.md,
+  },
+  modalTitle: {
+    ...Typography.heading4,
+    color: Colors.textPrimary,
+  },
+  modalOptions: {
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  modalOptionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: Spacing.md,
+  },
+  modalOptionBtnDestructive: {
+    borderColor: Colors.errorBg,
+  },
+  modalOptionIconBg: {
+    width: 38,
+    height: 38,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.goldOverlay,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalOptionText: {
+    ...Typography.bodyMedium,
+    color: Colors.textPrimary,
+    fontSize: 14,
+  },
+  modalCancelBtn: {
+    backgroundColor: Colors.surface,
+    paddingVertical: 14,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginTop: Spacing.xs,
+  },
+  modalCancelText: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 14,
+    color: Colors.textMuted,
+  },
 });

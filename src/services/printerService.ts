@@ -1,41 +1,44 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Alert, NativeModules, PermissionsAndroid, Platform } from "react-native";
+import { Alert, PermissionsAndroid, Platform } from "react-native";
 import { Order, OrderItem } from "../db/ordersDB";
 import { Settings } from "../db/settingsDB";
 
 // Safe Import Pattern to prevent crashes in Expo Go
 let BLEPrinter: any = null;
-
-const initializeBLE = () => {
-  if (BLEPrinter) return BLEPrinter;
-  
-  try {
-    // Check if we are in a native environment with the printer module
-    if (Platform.OS === 'android' && NativeModules.RNBLEPrinter) {
-      const printerLib = require("react-native-thermal-receipt-printer");
-      BLEPrinter = printerLib.BLEPrinter;
-      console.log("PrinterService: Native BLEPrinter module loaded successfully");
-    } else {
-      console.warn("PrinterService: Native module not found. Using Mocks.");
-      BLEPrinter = createMockPrinter();
-    }
-  } catch (e) {
-    console.warn("PrinterService: Failed to load native printer module. Using Mocks.", e);
-    BLEPrinter = createMockPrinter();
-  }
-  return BLEPrinter;
-};
+let isNativeModuleAvailable = false;
 
 const createMockPrinter = () => ({
   init: async () => { console.log("MOCK: BLEPrinter.init()"); return Promise.resolve(); },
   getDeviceList: async () => { console.log("MOCK: BLEPrinter.getDeviceList()"); return []; },
   connectPrinter: async () => { console.log("MOCK: BLEPrinter.connectPrinter()"); return Promise.resolve(true); },
+  printText: async () => { console.log("MOCK: BLEPrinter.printText()"); return Promise.resolve(); },
   printBill: async () => { console.log("MOCK: BLEPrinter.printBill()"); return Promise.resolve(); },
 });
 
-// Initialize with a mock by default if we can't find the real one immediately
-BLEPrinter = createMockPrinter();
-// Try to load real one
+const initializeBLE = () => {
+  if (BLEPrinter && isNativeModuleAvailable) return BLEPrinter;
+  
+  try {
+    // Check if we are in a native environment with the printer module
+    if (Platform.OS === 'android') {
+      const printerLib = require("react-native-earl-thermal-printer");
+      BLEPrinter = printerLib.BLEPrinter;
+      if (BLEPrinter) {
+        isNativeModuleAvailable = true;
+        console.log("PrinterService: Native BLEPrinter module from react-native-earl-thermal-printer loaded successfully");
+        return BLEPrinter;
+      }
+    }
+  } catch (e) {
+    console.warn("PrinterService: Failed to load native printer module from react-native-earl-thermal-printer. Using Mocks.", e);
+  }
+  
+  BLEPrinter = createMockPrinter();
+  isNativeModuleAvailable = false;
+  return BLEPrinter;
+};
+
+// Initialize
 initializeBLE();
 
 class PrinterService {
@@ -47,7 +50,7 @@ class PrinterService {
   charsPerLine: number = 32; // Default for 58mm
 
   constructor() {
-    this.isMock = !NativeModules.RNBLEPrinter;
+    this.isMock = !isNativeModuleAvailable;
     this.loadSettings();
   }
 
@@ -128,7 +131,7 @@ class PrinterService {
     } catch (e) {
       console.error("PrinterService: Initialization failed", e);
       // If it's a real device and it fails here, show the instructions
-      if (NativeModules.RNBLEPrinter) {
+      if (isNativeModuleAvailable) {
         Alert.alert(
           "Setup Required", 
           "Bluetooth initialization failed. Please ensure Bluetooth is ON and permissions are granted in App Settings.",
@@ -196,6 +199,18 @@ class PrinterService {
       }
     }
 
+    // Print Logo if configured
+    try {
+      const logoUri = await AsyncStorage.getItem('printer_logo_uri');
+      if (logoUri && BLEPrinter && typeof BLEPrinter.printImage === 'function') {
+        console.log("PrinterService: Printing logo image:", logoUri);
+        const imageWidth = this.paperWidth >= 80 ? 250 : 150;
+        await BLEPrinter.printImage(logoUri, imageWidth);
+      }
+    } catch (imageErr) {
+      console.warn("PrinterService: Failed to print logo image", imageErr);
+    }
+
     const width = this.charsPerLine;
     const center = (text: string) => {
       const pad = Math.floor((width - text.length) / 2);
@@ -204,6 +219,38 @@ class PrinterService {
     const leftRight = (left: string, right: string) => {
       const space = width - left.length - right.length;
       return left + " ".repeat(Math.max(1, space)) + right + "\n";
+    };
+
+    const formatThreeColumns = (col1: string, col2: string, col3: string) => {
+      const col3Width = 8; // Amt column width
+      const col2Width = 5; // Qty column width
+      const col1Width = width - col2Width - col3Width; // Remaining for Item
+
+      // Format Item (left-aligned)
+      let itemStr = col1;
+      if (itemStr.length > col1Width) {
+        itemStr = itemStr.substring(0, col1Width - 3) + "...";
+      } else {
+        itemStr = itemStr + " ".repeat(col1Width - itemStr.length);
+      }
+
+      // Format Qty (right-aligned inside its column)
+      let qtyStr = col2;
+      if (qtyStr.length > col2Width) {
+        qtyStr = qtyStr.substring(0, col2Width);
+      } else {
+        qtyStr = " ".repeat(col2Width - qtyStr.length) + qtyStr;
+      }
+
+      // Format Amt (right-aligned inside its column)
+      let amtStr = col3;
+      if (amtStr.length > col3Width) {
+        amtStr = amtStr.substring(0, col3Width);
+      } else {
+        amtStr = " ".repeat(col3Width - amtStr.length) + amtStr;
+      }
+
+      return itemStr + qtyStr + amtStr + "\n";
     };
 
     let receipt = "";
@@ -222,22 +269,18 @@ class PrinterService {
     receipt += "-".repeat(width) + "\n";
 
     // Items Header
-    receipt += leftRight("Item", "Amt");
+    receipt += formatThreeColumns("Item", "Qty", "Amt");
     receipt += "-".repeat(width) + "\n";
 
     items.forEach(item => {
       try {
-        // Line 1: Item Name
-        receipt += `${item.item_name || 'Item'}\n`;
-        
-        // Line 2: Qty x Rate and Subtotal
         const qty = Number(item.quantity || 0);
-        const rate = Number(item.rate || 0);
         const subtotal = Number(item.subtotal || 0);
+        const amtStr = subtotal.toFixed(2);
+        const qtyStr = qty.toString();
+        const name = item.item_name || 'Item';
         
-        const qtyLine = `  ${qty} x ${rate.toFixed(2)}`;
-        const amt = subtotal.toFixed(2);
-        receipt += leftRight(qtyLine, amt);
+        receipt += formatThreeColumns(name, qtyStr, amtStr);
       } catch (err) {
         console.warn("Error formatting item line", err);
       }
@@ -263,13 +306,20 @@ class PrinterService {
     console.log("PrinterService: Final receipt string length:", receipt.length);
 
     try {
-      if (!BLEPrinter || !BLEPrinter.printBill) {
+      if (!BLEPrinter) {
         throw new Error("BLEPrinter module not ready");
       }
-      await BLEPrinter.printBill(receipt);
+      
+      if (typeof BLEPrinter.printText === 'function') {
+        await BLEPrinter.printText(receipt);
+      } else if (typeof BLEPrinter.printBill === 'function') {
+        await BLEPrinter.printBill(receipt);
+      } else {
+        throw new Error("No printing method available on BLEPrinter module");
+      }
       return true;
     } catch (e) {
-      console.error("Print Error during printBill:", e);
+      console.error("Print Error during printing:", e);
       Alert.alert("Print Error", "Failed to send data to printer. Make sure you are using a Development Build, not Expo Go.");
       return false;
     }

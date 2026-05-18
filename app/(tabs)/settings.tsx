@@ -2,12 +2,14 @@ import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, KeyboardAvoidingView, Platform,
-  ActivityIndicator, FlatList, Linking,
+  ActivityIndicator, FlatList, Linking, Image, Modal,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import { getAllSettings, updateSettings, Settings } from '../../src/db/settingsDB';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../../src/constants/theme';
 import printerService from '../../src/services/printerService';
@@ -24,6 +26,8 @@ export default function SettingsScreen() {
     receipt_footer: '',
   });
   const [saved, setSaved] = useState(false);
+  const [logoUri, setLogoUri] = useState<string | null>(null);
+  const [logoModalVisible, setLogoModalVisible] = useState(false);
 
   // Printer State
   const [isScanning, setIsScanning] = useState(false);
@@ -48,6 +52,9 @@ export default function SettingsScreen() {
   const loadPrinterSettings = async () => {
     const width = await AsyncStorage.getItem('printer_paper_width');
     if (width) setPaperWidth(parseInt(width, 10));
+
+    const savedLogo = await AsyncStorage.getItem('printer_logo_uri');
+    setLogoUri(savedLogo);
 
     const licenseKey = await AsyncStorage.getItem('licenseKey');
     if (!licenseKey) return;
@@ -154,6 +161,10 @@ export default function SettingsScreen() {
   const handlePaperWidth = (width: number) => {
     setPaperWidth(width);
     printerService.setPaperWidth(width);
+  };
+
+  const pickLogoImage = () => {
+    setLogoModalVisible(true);
   };
 
   const handleSave = () => {
@@ -274,6 +285,57 @@ export default function SettingsScreen() {
                 placeholder="Enter phone number" placeholderTextColor={Colors.textMuted}
                 keyboardType="phone-pad" />
             </View>
+            <Text style={[styles.fieldLabel, { marginTop: Spacing.md }]}>Receipt Footer Text</Text>
+            <View style={styles.inputRow}>
+              <MaterialCommunityIcons name="card-text-outline" size={18} color={Colors.gold} style={{ marginRight: 8 }} />
+              <TextInput style={styles.input} value={settings.receipt_footer}
+                onChangeText={v => setSettings(s => ({ ...s, receipt_footer: v }))}
+                placeholder="Enter receipt footer text (e.g. Thank you!)" placeholderTextColor={Colors.textMuted} />
+            </View>
+          </View>
+
+          {/* Receipt Logo */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <MaterialCommunityIcons name="image-outline" size={18} color={Colors.gold} />
+              <Text style={styles.sectionTitle}>Receipt Logo</Text>
+            </View>
+            <Text style={styles.fieldLabel}>Logo Image</Text>
+            
+            <TouchableOpacity 
+              style={[styles.logoPicker, logoUri ? styles.logoPickerHasImage : null]} 
+              onPress={pickLogoImage} 
+              activeOpacity={0.8}
+            >
+              {logoUri ? (
+                <View style={styles.logoContainer}>
+                  <Image source={{ uri: logoUri }} style={styles.logoPreview} resizeMode="contain" />
+                  <View style={styles.logoEditOverlay}>
+                    <MaterialCommunityIcons name="pencil" size={16} color={Colors.textInverse} style={{ marginRight: 4 }} />
+                    <Text style={styles.logoEditText}>Change Logo</Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.logoPlaceholder}>
+                  <MaterialCommunityIcons name="image-plus" size={32} color={Colors.gold} />
+                  <Text style={styles.logoHint}>Tap to select Receipt Logo</Text>
+                  <Text style={styles.logoHintSub}>(optional - printed at the top of the bill)</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            
+            {logoUri && (
+              <TouchableOpacity 
+                style={styles.removeLogoBtn}
+                onPress={async () => {
+                  setLogoUri(null);
+                  await AsyncStorage.removeItem('printer_logo_uri');
+                }}
+              >
+                <MaterialCommunityIcons name="delete-outline" size={18} color="#E74C3C" />
+                <Text style={styles.removeLogoText}>Remove Logo</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Bluetooth Printer */}
@@ -446,12 +508,12 @@ export default function SettingsScreen() {
             
             <TouchableOpacity 
               style={styles.contactItem}
-              onPress={() => Linking.openURL('mailto:projectlead@imcbs.com')}
+              onPress={() => Linking.openURL('mailto:sales@imcbs.com')}
             >
               <MaterialCommunityIcons name="email-outline" size={20} color={Colors.gold} />
               <View>
                 <Text style={styles.contactLabel}>Email Support</Text>
-                <Text style={styles.contactValue}>projectlead@imcbs.com</Text>
+                <Text style={styles.contactValue}>sales@imcbs.com</Text>
               </View>
             </TouchableOpacity>
 
@@ -495,6 +557,103 @@ export default function SettingsScreen() {
 
           <View style={{ height: 40 }} />
         </ScrollView>
+
+        {/* Custom Logo Picker Modal */}
+        <Modal
+          visible={logoModalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setLogoModalVisible(false)}
+        >
+          <TouchableWithoutFeedback onPress={() => setLogoModalVisible(false)}>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback>
+                <View style={styles.modalContainer}>
+                  {/* Header */}
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>Select Logo Image</Text>
+                    <TouchableOpacity onPress={() => setLogoModalVisible(false)}>
+                      <MaterialCommunityIcons name="close" size={24} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Options */}
+                  <View style={styles.modalOptions}>
+                    <TouchableOpacity
+                      style={styles.modalOptionBtn}
+                      onPress={async () => {
+                        setLogoModalVisible(false);
+                        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+                        if (status !== 'granted') { Alert.alert('Permission needed', 'Allow camera access in settings.'); return; }
+                        const result = await ImagePicker.launchCameraAsync({
+                          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                          allowsEditing: true, aspect: [1, 1], quality: 0.7,
+                        });
+                        if (!result.canceled) {
+                          const uri = result.assets[0].uri;
+                          setLogoUri(uri);
+                          await AsyncStorage.setItem('printer_logo_uri', uri);
+                        }
+                      }}
+                    >
+                      <View style={styles.modalOptionIconBg}>
+                        <MaterialCommunityIcons name="camera" size={22} color={Colors.gold} />
+                      </View>
+                      <Text style={styles.modalOptionText}>Take Photo</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.modalOptionBtn}
+                      onPress={async () => {
+                        setLogoModalVisible(false);
+                        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                        if (status !== 'granted') { Alert.alert('Permission needed', 'Allow gallery access in settings.'); return; }
+                        const result = await ImagePicker.launchImageLibraryAsync({
+                          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                          allowsEditing: true, aspect: [1, 1], quality: 0.7,
+                        });
+                        if (!result.canceled) {
+                          const uri = result.assets[0].uri;
+                          setLogoUri(uri);
+                          await AsyncStorage.setItem('printer_logo_uri', uri);
+                        }
+                      }}
+                    >
+                      <View style={styles.modalOptionIconBg}>
+                        <MaterialCommunityIcons name="image" size={22} color={Colors.gold} />
+                      </View>
+                      <Text style={styles.modalOptionText}>Choose from Gallery</Text>
+                    </TouchableOpacity>
+
+                    {logoUri && (
+                      <TouchableOpacity
+                        style={[styles.modalOptionBtn, styles.modalOptionBtnDestructive]}
+                        onPress={async () => {
+                          setLogoModalVisible(false);
+                          setLogoUri(null);
+                          await AsyncStorage.removeItem('printer_logo_uri');
+                        }}
+                      >
+                        <View style={[styles.modalOptionIconBg, { backgroundColor: Colors.errorBg }]}>
+                          <MaterialCommunityIcons name="trash-can-outline" size={22} color={Colors.error} />
+                        </View>
+                        <Text style={[styles.modalOptionText, { color: Colors.error }]}>Remove Logo</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Cancel Button */}
+                  <TouchableOpacity
+                    style={styles.modalCancelBtn}
+                    onPress={() => setLogoModalVisible(false)}
+                  >
+                    <Text style={styles.modalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -677,5 +836,155 @@ const styles = StyleSheet.create({
   contactValue: {
     ...Typography.bodyMedium,
     color: Colors.textPrimary,
+  },
+  logoPicker: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderStyle: 'dashed',
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    marginTop: Spacing.xs,
+  },
+  logoPickerHasImage: {
+    borderStyle: 'solid',
+    height: 140,
+  },
+  logoContainer: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    backgroundColor: '#1E1E1E',
+  },
+  logoPreview: {
+    width: '90%',
+    height: '85%',
+  },
+  logoEditOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+    gap: 4,
+  },
+  logoEditText: {
+    color: Colors.textInverse,
+    fontFamily: 'Poppins-Medium',
+    fontSize: 11,
+  },
+  logoPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    padding: Spacing.md,
+  },
+  logoHint: {
+    color: Colors.textPrimary,
+    fontFamily: 'Poppins-Medium',
+    fontSize: 13,
+  },
+  logoHintSub: {
+    color: Colors.textMuted,
+    fontFamily: 'Poppins-Regular',
+    fontSize: 11,
+  },
+  removeLogoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: Spacing.md,
+    paddingVertical: 8,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: '#E74C3C33',
+  },
+  removeLogoText: {
+    color: '#E74C3C',
+    fontFamily: 'Poppins-Medium',
+    fontSize: 13,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: Colors.cardElevated,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.card,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    marginBottom: Spacing.md,
+  },
+  modalTitle: {
+    ...Typography.heading4,
+    color: Colors.textPrimary,
+  },
+  modalOptions: {
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  modalOptionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: Spacing.md,
+  },
+  modalOptionBtnDestructive: {
+    borderColor: Colors.errorBg,
+  },
+  modalOptionIconBg: {
+    width: 38,
+    height: 38,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.goldOverlay,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalOptionText: {
+    ...Typography.bodyMedium,
+    color: Colors.textPrimary,
+    fontSize: 14,
+  },
+  modalCancelBtn: {
+    backgroundColor: Colors.surface,
+    paddingVertical: 14,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginTop: Spacing.xs,
+  },
+  modalCancelText: {
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 14,
+    color: Colors.textMuted,
   },
 });
