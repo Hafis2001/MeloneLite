@@ -51,7 +51,28 @@ class PrinterService {
 
   constructor() {
     this.isMock = !isNativeModuleAvailable;
-    this.loadSettings();
+    this.initPrinterState();
+  }
+
+  async initPrinterState() {
+    await this.loadSettings();
+    await this.detectBuiltInPrinterSilently();
+  }
+
+  async detectBuiltInPrinterSilently() {
+    if (this.isMock) return;
+    try {
+      console.log("PrinterService: Attempting silent built-in printer detection...");
+      const result = await BLEPrinter.init();
+      if (result === "BUILTIN_PRINTER") {
+        console.log("PrinterService: Silently detected built-in TVS/UBX printer!");
+        this.connected = true;
+        this.currentPrinter = { device_name: "Built-in Printer (TVS POS)", inner_mac_address: "BUILTIN_PRINTER" };
+        this.isInitialized = true;
+      }
+    } catch (e) {
+      console.log("PrinterService: Silent built-in printer check returned:", e);
+    }
   }
 
   async loadSettings() {
@@ -82,7 +103,8 @@ class PrinterService {
     
     const requestWithTimeout = async () => {
       try {
-        if (Platform.Version >= 31) {
+        const apiLevel = typeof Platform.Version === 'string' ? parseInt(Platform.Version, 10) : Platform.Version;
+        if (apiLevel >= 31) {
           console.log("PrinterService: Checking Bluetooth Connect...");
           await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT);
           console.log("PrinterService: Checking Bluetooth Scan...");
@@ -125,6 +147,13 @@ class PrinterService {
       console.log("PrinterService: Calling BLEPrinter.init()...");
       const result = await BLEPrinter.init();
       console.log("PrinterService: BLEPrinter.init() returned:", result);
+      
+      if (result === "BUILTIN_PRINTER") {
+        console.log("PrinterService: Built-in TVS/UBX printer detected. Auto-connecting built-in printer.");
+        this.connected = true;
+        this.currentPrinter = { device_name: "Built-in Printer (TVS POS)", inner_mac_address: "BUILTIN_PRINTER" };
+      }
+      
       this.isInitialized = true;
       console.log("PrinterService: Initialization successful");
       return true;

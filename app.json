@@ -17,7 +17,6 @@
       "bundleIdentifier": "com.melonelite.restaurant"
     },
     "android": {
-      
       "adaptiveIcon": {
         "foregroundImage": "./assets/appnew.png",
         "backgroundColor": "#FFFFFF"
@@ -58,7 +57,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "5b3a9440-ca42-4281-b7af-e5c0bb88f6ea"
+        "projectId": "408ff29d-f569-47b2-944d-6db12d29f2b1"
       }
     }
   }

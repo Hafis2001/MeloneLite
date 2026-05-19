@@ -1,8 +1,367 @@
 diff --git a/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/BLEPrinterAdapter.java b/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/BLEPrinterAdapter.java
-index 28c4a23..7a6b04f 100644
+index 28c4a23..de0e0b1 100644
 --- a/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/BLEPrinterAdapter.java
 +++ b/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/BLEPrinterAdapter.java
-@@ -192,6 +192,64 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+@@ -15,6 +15,7 @@ import com.facebook.react.bridge.Arguments;
+ import com.facebook.react.bridge.Promise;
+ import com.facebook.react.bridge.ReactApplicationContext;
+ import com.facebook.react.bridge.WritableArray;
++import com.facebook.react.bridge.WritableMap;
+ import com.google.zxing.EncodeHintType;
+ import com.google.zxing.WriterException;
+ import com.google.zxing.common.BitMatrix;
+@@ -52,6 +53,245 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+     private final static byte[] LINE_FEED = new byte[] { 0x0A };
+     private static byte[] CENTER_ALIGN = { 0x1B, 0X61, 0X31 };
+ 
++    private static Class<?> ubxPrinterClass = null;
++    private static Object ubxPrinterInstance = null;
++    private static boolean isBuiltInPrinterChecked = false;
++    private static boolean isBuiltInPrinterPresent = false;
++    private static boolean useBuiltInPrinter = false;
++
++    private static final String[] UBX_PRINTER_CLASSES = {
++        "android.device.PrinterManager",
++        "device.printer.PrinterManager",
++        "com.ubx.usdk.printer.PrinterManager",
++        "com.android.device.PrinterManager"
++    };
++
++    private synchronized static void checkBuiltInPrinter() {
++        if (isBuiltInPrinterChecked) return;
++        for (String clsName : UBX_PRINTER_CLASSES) {
++            try {
++                Class<?> cls = Class.forName(clsName);
++                Object inst = cls.newInstance();
++                ubxPrinterClass = cls;
++                ubxPrinterInstance = inst;
++                isBuiltInPrinterPresent = true;
++                useBuiltInPrinter = true;
++                Log.d("RNBLEPrinter", "Built-in TVS/UBX printer detected and initialized via: " + clsName);
++                break;
++            } catch (Exception e) {
++                // Ignore and try next
++            }
++        }
++        isBuiltInPrinterChecked = true;
++    }
++
++    private static class StyledLine {
++        String text;
++        int alignment = 0; // 0=left, 1=center, 2=right
++        boolean bold = false;
++        boolean doubleHeight = false;
++        boolean doubleWidth = false;
++
++        StyledLine(String text, int alignment, boolean bold, boolean doubleHeight, boolean doubleWidth) {
++            this.text = text;
++            this.alignment = alignment;
++            this.bold = bold;
++            this.doubleHeight = doubleHeight;
++            this.doubleWidth = doubleWidth;
++        }
++    }
++
++    private static class Line {
++        String text;
++        int alignment = 0;
++        boolean bold = false;
++        boolean doubleHeight = false;
++        boolean doubleWidth = false;
++
++        Line(String text, int alignment, boolean bold, boolean doubleHeight, boolean doubleWidth) {
++            this.text = text;
++            this.alignment = alignment;
++            this.bold = bold;
++            this.doubleHeight = doubleHeight;
++            this.doubleWidth = doubleWidth;
++        }
++    }
++
++    private java.util.List<StyledLine> parseEscPos(byte[] bytes) {
++        java.util.List<StyledLine> lines = new java.util.ArrayList<>();
++        int alignment = 0;
++        boolean bold = false;
++        boolean doubleHeight = false;
++        boolean doubleWidth = false;
++        
++        ByteArrayOutputStream lineBytes = new ByteArrayOutputStream();
++        int i = 0;
++        while (i < bytes.length) {
++            byte b = bytes[i];
++            if (b == 0x1B) { // ESC
++                if (i + 2 < bytes.length) {
++                    byte cmd = bytes[i + 1];
++                    byte val = bytes[i + 2];
++                    if (cmd == 0x45) { // Bold 'E'
++                        if (lineBytes.size() > 0) {
++                            String text = "";
++                            try { text = lineBytes.toString("UTF-8"); } catch (Exception e) {}
++                            lines.add(new StyledLine(text, alignment, bold, doubleHeight, doubleWidth));
++                            lineBytes.reset();
++                        }
++                        bold = (val == 0x01 || val == 0x31);
++                        i += 3;
++                        continue;
++                    } else if (cmd == 0x61) { // Alignment 'a'
++                        if (lineBytes.size() > 0) {
++                            String text = "";
++                            try { text = lineBytes.toString("UTF-8"); } catch (Exception e) {}
++                            lines.add(new StyledLine(text, alignment, bold, doubleHeight, doubleWidth));
++                            lineBytes.reset();
++                        }
++                        if (val == 0x00 || val == 0x30) alignment = 0;
++                        else if (val == 0x01 || val == 0x31) alignment = 1;
++                        else if (val == 0x02 || val == 0x32) alignment = 2;
++                        i += 3;
++                        continue;
++                    }
++                }
++            } else if (b == 0x1D) { // GS
++                if (i + 2 < bytes.length) {
++                    byte cmd = bytes[i + 1];
++                    byte val = bytes[i + 2];
++                    if (cmd == 0x21) { // Font size '!'
++                        if (lineBytes.size() > 0) {
++                            String text = "";
++                            try { text = lineBytes.toString("UTF-8"); } catch (Exception e) {}
++                            lines.add(new StyledLine(text, alignment, bold, doubleHeight, doubleWidth));
++                            lineBytes.reset();
++                        }
++                        doubleWidth = (val & 0xF0) > 0;
++                        doubleHeight = (val & 0x0F) > 0;
++                        i += 3;
++                        continue;
++                    }
++                }
++            } else if (b == 0x0A) { // LF
++                String text = "";
++                try { text = lineBytes.toString("UTF-8"); } catch (Exception e) {}
++                lines.add(new StyledLine(text, alignment, bold, doubleHeight, doubleWidth));
++                lines.add(new StyledLine("\n", alignment, bold, doubleHeight, doubleWidth));
++                lineBytes.reset();
++                i++;
++                continue;
++            }
++            if (b != 0x00 && b != 0x0D) {
++                lineBytes.write(b);
++            }
++            i++;
++        }
++        if (lineBytes.size() > 0) {
++            String text = "";
++            try { text = lineBytes.toString("UTF-8"); } catch (Exception e) {}
++            lines.add(new StyledLine(text, alignment, bold, doubleHeight, doubleWidth));
++        }
++        return lines;
++    }
++
++    private java.util.List<Line> groupLines(java.util.List<StyledLine> segments) {
++        java.util.List<Line> lines = new java.util.ArrayList<>();
++        StringBuilder lineText = new StringBuilder();
++        int alignment = 0;
++        boolean bold = false;
++        boolean doubleHeight = false;
++        boolean doubleWidth = false;
++
++        for (StyledLine seg : segments) {
++            if ("\n".equals(seg.text)) {
++                lines.add(new Line(lineText.toString(), alignment, bold, doubleHeight, doubleWidth));
++                lineText = new StringBuilder();
++            } else {
++                lineText.append(seg.text);
++                if (seg.text.length() > 0) {
++                    alignment = seg.alignment;
++                    bold = seg.bold;
++                    doubleHeight = seg.doubleHeight;
++                    doubleWidth = seg.doubleWidth;
++                }
++            }
++        }
++        if (lineText.length() > 0) {
++            lines.add(new Line(lineText.toString(), alignment, bold, doubleHeight, doubleWidth));
++        }
++        return lines;
++    }
++
++    private synchronized void printToBuiltIn(byte[] bytes) throws Exception {
++        if (!isBuiltInPrinterPresent || ubxPrinterInstance == null) {
++            throw new Exception("Built-in printer not present or not initialized.");
++        }
++        
++        java.util.List<StyledLine> segments = parseEscPos(bytes);
++        java.util.List<Line> lines = groupLines(segments);
++
++        java.lang.reflect.Method openMethod = ubxPrinterClass.getMethod("open");
++        java.lang.reflect.Method setupPageMethod = ubxPrinterClass.getMethod("setupPage", int.class, int.class);
++        java.lang.reflect.Method drawTextExMethod = ubxPrinterClass.getMethod("drawTextEx", 
++            String.class, int.class, int.class, int.class, int.class, String.class, int.class, int.class, int.class, int.class);
++        java.lang.reflect.Method printPageMethod = ubxPrinterClass.getMethod("printPage", int.class);
++        java.lang.reflect.Method closeMethod = ubxPrinterClass.getMethod("close");
++        java.lang.reflect.Method paperFeedMethod = null;
++        try {
++            paperFeedMethod = ubxPrinterClass.getMethod("paperFeed", int.class);
++        } catch (NoSuchMethodException e) {
++            // Ignore if paperFeed is not present
++        }
++
++        // Open printer
++        openMethod.invoke(ubxPrinterInstance);
++
++        int paperWidth = 384;
++        int currentY = 10;
++        for (Line line : lines) {
++            int h = line.doubleHeight ? 48 : 28;
++            currentY += h;
++        }
++        int pageHeight = currentY + 40;
++
++        setupPageMethod.invoke(ubxPrinterInstance, paperWidth, pageHeight);
++
++        int y = 10;
++        for (Line line : lines) {
++            int fontSize = line.doubleHeight ? 36 : 24;
++            int fontStyle = line.bold ? 1 : 0;
++            int alignment = line.alignment;
++            int h = line.doubleHeight ? 48 : 28;
++
++            drawTextExMethod.invoke(ubxPrinterInstance, 
++                line.text, 
++                0, 
++                y, 
++                paperWidth, 
++                h + 6, 
++                null, 
++                fontSize, 
++                fontStyle, 
++                0, 
++                alignment
++            );
++            y += h;
++        }
++
++        printPageMethod.invoke(ubxPrinterInstance, 0);
++
++        if (paperFeedMethod != null) {
++            try {
++                paperFeedMethod.invoke(ubxPrinterInstance, 30);
++            } catch (Exception e) {
++                // Ignore paperFeed failure
++            }
++        }
++
++        closeMethod.invoke(ubxPrinterInstance);
++    }
++
+     private BLEPrinterAdapter() {
+     }
+ 
+@@ -65,6 +305,12 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+     @Override
+     public void init(ReactApplicationContext reactContext, Promise promise) {
+         this.mContext = reactContext;
++        checkBuiltInPrinter();
++        if (isBuiltInPrinterPresent) {
++            useBuiltInPrinter = true;
++            promise.resolve("BUILTIN_PRINTER");
++            return;
++        }
+         BluetoothAdapter bluetoothAdapter = getBTAdapter();
+         if (bluetoothAdapter == null) {
+             promise.reject("ERR_BT_ADAPTER", "No bluetooth adapter available");
+@@ -83,25 +329,40 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+ 
+     @Override
+     public void getDeviceList(Promise promise) {
+-        BluetoothAdapter bluetoothAdapter = getBTAdapter();
+-        if (bluetoothAdapter == null) {
+-            promise.reject("ERR_BT_ADAPTER", "No bluetooth adapter available");
+-            return;
+-        }
+-        if (!bluetoothAdapter.isEnabled()) {
+-            promise.reject("ERR_BT_DISABLED", "Bluetooth is not enabled");
+-            return;
+-        }
++        checkBuiltInPrinter();
+         WritableArray array = Arguments.createArray();
+-        Set<BluetoothDevice> pairedDevices = getBTAdapter().getBondedDevices();
+-        for (BluetoothDevice device : pairedDevices) {
+-            array.pushMap(new BLEPrinterDevice(device).toRNWritableMap());
++        if (isBuiltInPrinterPresent) {
++            WritableMap builtinMap = Arguments.createMap();
++            builtinMap.putString("device_name", "Built-in Printer (TVS POS)");
++            builtinMap.putString("inner_mac_address", "BUILTIN_PRINTER");
++            array.pushMap(builtinMap);
++        }
++        
++        BluetoothAdapter bluetoothAdapter = getBTAdapter();
++        if (bluetoothAdapter != null && bluetoothAdapter.isEnabled()) {
++            Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
++            for (BluetoothDevice device : pairedDevices) {
++                array.pushMap(new BLEPrinterDevice(device).toRNWritableMap());
++            }
+         }
+         promise.resolve(array);
+     }
+ 
+     @Override
+     public void selectDevice(PrinterDeviceId printerDeviceId, Promise promise) {
++        checkBuiltInPrinter();
++        BLEPrinterDeviceId blePrinterDeviceId = (BLEPrinterDeviceId) printerDeviceId;
++        if ("BUILTIN_PRINTER".equals(blePrinterDeviceId.getInnerMacAddress())) {
++            useBuiltInPrinter = true;
++            WritableMap builtinMap = Arguments.createMap();
++            builtinMap.putString("device_name", "Built-in Printer (TVS POS)");
++            builtinMap.putString("inner_mac_address", "BUILTIN_PRINTER");
++            promise.resolve(builtinMap);
++            return;
++        }
++
++        useBuiltInPrinter = false;
++
+         BluetoothAdapter bluetoothAdapter = getBTAdapter();
+         if (bluetoothAdapter == null) {
+             promise.reject("ERR_BT_ADAPTER", "No bluetooth adapter available");
+@@ -111,7 +372,6 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+             promise.reject("ERR_BT_DISABLED", "Bluetooth is not enabled");
+             return;
+         }
+-        BLEPrinterDeviceId blePrinterDeviceId = (BLEPrinterDeviceId) printerDeviceId;
+         if (this.mBluetoothDevice != null) {
+             if (this.mBluetoothDevice.getAddress().equals(blePrinterDeviceId.getInnerMacAddress())
+                     && this.mBluetoothSocket != null) {
+@@ -166,6 +426,30 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+ 
+     @Override
+     public void printRawData(String rawBase64Data, Promise promise) {
++        checkBuiltInPrinter();
++        if (useBuiltInPrinter && isBuiltInPrinterPresent) {
++            final String rawData = rawBase64Data;
++            Log.v(LOG_TAG, "start to print raw data via built-in printer");
++            new Thread(new Runnable() {
++                @Override
++                public void run() {
++                    try {
++                        byte[] bytes = Base64.decode(rawData, Base64.DEFAULT);
++                        printToBuiltIn(bytes);
++                        promise.resolve(null);
++                    } catch (Exception e) {
++                        e.printStackTrace();
++                        String errorMsg = e.getMessage();
++                        if (e.getCause() != null) {
++                            errorMsg += " | Cause: " + e.getCause().toString();
++                        }
++                        promise.reject("ERR_BUILTIN_PRINT", errorMsg);
++                    }
++                }
++            }).start();
++            return;
++        }
++
+         if (this.mBluetoothSocket == null) {
+             promise.reject("ERR_NO_CONN", "Bluetooth connection is not built, may be you forgot to connectPrinter");
+             return;
+@@ -192,6 +476,64 @@ public class BLEPrinterAdapter implements PrinterAdapter {
      }
  
      public static Bitmap getBitmapFromURL(String src) {
@@ -67,7 +426,7 @@ index 28c4a23..7a6b04f 100644
          try {
              URL url = new URL(src);
              HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-@@ -199,24 +257,107 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+@@ -199,31 +541,176 @@ public class BLEPrinterAdapter implements PrinterAdapter {
              connection.connect();
              InputStream input = connection.getInputStream();
              Bitmap myBitmap = BitmapFactory.decodeStream(input);
@@ -177,10 +536,80 @@ index 28c4a23..7a6b04f 100644
              return;
          }
 +        bitmapImage = trimBitmap(bitmapImage);
++
++        checkBuiltInPrinter();
++        final int maxSize = imageWidth > 0 ? (int) imageWidth : 200;
++
++        if (useBuiltInPrinter && isBuiltInPrinterPresent) {
++            final Bitmap finalBitmap = bitmapImage;
++            new Thread(new Runnable() {
++                @Override
++                public void run() {
++                    try {
++                        java.lang.reflect.Method openMethod = ubxPrinterClass.getMethod("open");
++                        java.lang.reflect.Method setupPageMethod = ubxPrinterClass.getMethod("setupPage", int.class, int.class);
++                        java.lang.reflect.Method drawBitmapMethod = ubxPrinterClass.getMethod("drawBitmap", Bitmap.class, int.class, int.class);
++                        java.lang.reflect.Method printPageMethod = ubxPrinterClass.getMethod("printPage", int.class);
++                        java.lang.reflect.Method closeMethod = ubxPrinterClass.getMethod("close");
++
++                        openMethod.invoke(ubxPrinterInstance);
++
++                        int paperWidth = 384;
++                        Bitmap scaledBitmap = finalBitmap;
++                        if (finalBitmap.getWidth() > paperWidth) {
++                            double ratio = (double) paperWidth / finalBitmap.getWidth();
++                            int newHeight = (int) (finalBitmap.getHeight() * ratio);
++                            scaledBitmap = Bitmap.createScaledBitmap(finalBitmap, paperWidth, newHeight, true);
++                        } else if (maxSize < paperWidth) {
++                            // Scale down if maxSize is specified smaller
++                            double ratio = (double) maxSize / finalBitmap.getWidth();
++                            int newHeight = (int) (finalBitmap.getHeight() * ratio);
++                            scaledBitmap = Bitmap.createScaledBitmap(finalBitmap, maxSize, newHeight, true);
++                        }
++
++                        int x = (paperWidth - scaledBitmap.getWidth()) / 2;
++                        int pageHeight = scaledBitmap.getHeight() + 20;
++
++                        setupPageMethod.invoke(ubxPrinterInstance, paperWidth, pageHeight);
++                        drawBitmapMethod.invoke(ubxPrinterInstance, scaledBitmap, x, 10);
++                        printPageMethod.invoke(ubxPrinterInstance, 0);
++
++                        java.lang.reflect.Method paperFeedMethod = null;
++                        try {
++                            paperFeedMethod = ubxPrinterClass.getMethod("paperFeed", int.class);
++                        } catch (NoSuchMethodException e) {
++                            // Ignore
++                        }
++                        if (paperFeedMethod != null) {
++                            try { paperFeedMethod.invoke(ubxPrinterInstance, 30); } catch (Exception e) {}
++                        }
++
++                        closeMethod.invoke(ubxPrinterInstance);
++                        promise.resolve(null);
++                    } catch (Exception e) {
++                        e.printStackTrace();
++                        String errorMsg = e.getMessage();
++                        if (e.getCause() != null) {
++                            errorMsg += " | Cause: " + e.getCause().toString();
++                        }
++                        promise.reject("ERR_PRINT_IMAGE", errorMsg);
++                    }
++                }
++            }).start();
++            return;
++        }
++
          if (this.mBluetoothSocket == null) {
              promise.reject("ERR_NO_CONN", "Bluetooth connection is not built, may be you forgot to connectPrinter");
              return;
-@@ -242,7 +383,6 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+         }
+ 
+         final BluetoothSocket socket = this.mBluetoothSocket;
+-        final int maxSize = imageWidth > 0 ? (int) imageWidth : 200;
+ 
+         try {
+             int[][] pixels = getPixelsSlow(bitmapImage, maxSize);
+@@ -242,7 +729,6 @@ public class BLEPrinterAdapter implements PrinterAdapter {
                  printerOutputStream.write(LINE_FEED);
              }
              printerOutputStream.write(SET_LINE_SPACE_32);
@@ -188,7 +617,62 @@ index 28c4a23..7a6b04f 100644
              printerOutputStream.flush();
              promise.resolve(null);
          } catch (IOException e) {
-@@ -347,7 +487,7 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+@@ -261,6 +747,54 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+             promise.reject("ERR_QR", "QR code generation failed");
+             return;
+         }
++
++        checkBuiltInPrinter();
++        if (useBuiltInPrinter && isBuiltInPrinterPresent) {
++            new Thread(new Runnable() {
++                @Override
++                public void run() {
++                    try {
++                        java.lang.reflect.Method openMethod = ubxPrinterClass.getMethod("open");
++                        java.lang.reflect.Method setupPageMethod = ubxPrinterClass.getMethod("setupPage", int.class, int.class);
++                        java.lang.reflect.Method drawBitmapMethod = ubxPrinterClass.getMethod("drawBitmap", Bitmap.class, int.class, int.class);
++                        java.lang.reflect.Method printPageMethod = ubxPrinterClass.getMethod("printPage", int.class);
++                        java.lang.reflect.Method closeMethod = ubxPrinterClass.getMethod("close");
++
++                        openMethod.invoke(ubxPrinterInstance);
++
++                        int paperWidth = 384;
++                        int x = (paperWidth - bitmapImage.getWidth()) / 2;
++                        int pageHeight = bitmapImage.getHeight() + 20;
++
++                        setupPageMethod.invoke(ubxPrinterInstance, paperWidth, pageHeight);
++                        drawBitmapMethod.invoke(ubxPrinterInstance, bitmapImage, x, 10);
++                        printPageMethod.invoke(ubxPrinterInstance, 0);
++
++                        java.lang.reflect.Method paperFeedMethod = null;
++                        try {
++                            paperFeedMethod = ubxPrinterClass.getMethod("paperFeed", int.class);
++                        } catch (NoSuchMethodException e) {
++                            // Ignore
++                        }
++                        if (paperFeedMethod != null) {
++                            try { paperFeedMethod.invoke(ubxPrinterInstance, 30); } catch (Exception e) {}
++                        }
++
++                        closeMethod.invoke(ubxPrinterInstance);
++                        promise.resolve(null);
++                    } catch (Exception e) {
++                        e.printStackTrace();
++                        String errorMsg = e.getMessage();
++                        if (e.getCause() != null) {
++                            errorMsg += " | Cause: " + e.getCause().toString();
++                        }
++                        promise.reject("ERR_PRINT_QR", errorMsg);
++                    }
++                }
++            }).start();
++            return;
++        }
++
+         if (this.mBluetoothSocket == null) {
+             promise.reject("ERR_NO_CONN", "Bluetooth connection is not built, may be you forgot to connectPrinter");
+             return;
+@@ -347,7 +881,7 @@ public class BLEPrinterAdapter implements PrinterAdapter {
          return slices;
      }
  
