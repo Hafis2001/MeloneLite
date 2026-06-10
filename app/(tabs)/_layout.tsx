@@ -5,11 +5,16 @@ import { Colors, Radius } from '../../src/constants/theme';
 import { useCart } from '../../src/context/CartContext';
 import { Text, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { useWindowDimensions } from 'react-native';
+import { DualText } from '../../src/components/DualText';
+import { useThemeVersion } from '../../src/context/ThemeContext';
 
 function TabIcon({ name, focused, badge }: { name: any; focused: boolean; badge?: number }) {
+  const themeVersion = useThemeVersion();
+  const styles = useMemo(() => createStyles(), [themeVersion]);
   return (
     <View style={styles.iconWrapper}>
       <MaterialCommunityIcons
@@ -28,10 +33,14 @@ function TabIcon({ name, focused, badge }: { name: any; focused: boolean; badge?
 }
 
 export default function TabsLayout() {
+  const themeVersion = useThemeVersion();
+  const styles = useMemo(() => createStyles(), [themeVersion]);
   const { getTotalItems } = useCart();
   const cartCount = getTotalItems();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { width, height } = useWindowDimensions();
+  const isLandscapePhone = width > height && width < 1024;
   
   const [isDemo, setIsDemo] = useState(false);
   const [daysLeft, setDaysLeft] = useState<number | null>(null);
@@ -169,8 +178,9 @@ export default function TabsLayout() {
         tabBarStyle: [
           styles.tabBar, 
           { 
-            height: (Platform.OS === 'ios' ? 65 : 60) + (insets.bottom > 0 ? insets.bottom : (Platform.OS === 'android' ? 20 : 0)), 
-            paddingBottom: insets.bottom > 0 ? insets.bottom : (Platform.OS === 'android' ? 20 : 8)
+            height: isLandscapePhone ? 50 : ((Platform.OS === 'ios' ? 70 : 80) + (insets.bottom > 0 ? insets.bottom : (Platform.OS === 'android' ? 25 : 0))), 
+            paddingBottom: isLandscapePhone ? 4 : (insets.bottom > 0 ? insets.bottom + 10 : (Platform.OS === 'android' ? 25 : 12)),
+            paddingTop: isLandscapePhone ? 4 : 8,
           }
         ],
         tabBarActiveTintColor: Colors.gold,
@@ -183,6 +193,9 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: 'Sales',
+          tabBarLabel: ({ color }) => (
+            <DualText text="Sales" style={[styles.tabLabel, { color }]} />
+          ),
           tabBarIcon: ({ focused }) => <TabIcon name="silverware-fork-knife" focused={focused} />,
         }}
       />
@@ -190,6 +203,9 @@ export default function TabsLayout() {
         name="items"
         options={{
           title: 'Items',
+          tabBarLabel: ({ color }) => (
+            <DualText text="Items" style={[styles.tabLabel, { color }]} />
+          ),
           tabBarIcon: ({ focused }) => <TabIcon name="food-variant" focused={focused} />,
         }}
       />
@@ -197,6 +213,9 @@ export default function TabsLayout() {
         name="categories"
         options={{
           title: 'Categories',
+          tabBarLabel: ({ color }) => (
+            <DualText text="Categories" style={[styles.tabLabel, { color }]} />
+          ),
           tabBarIcon: ({ focused }) => <TabIcon name="tag-multiple" focused={focused} />,
         }}
       />
@@ -204,6 +223,9 @@ export default function TabsLayout() {
         name="orders"
         options={{
           title: 'Report',
+          tabBarLabel: ({ color }) => (
+            <DualText text="Report" style={[styles.tabLabel, { color }]} />
+          ),
           tabBarIcon: ({ focused }) => <TabIcon name="receipt" focused={focused} />,
         }}
       />
@@ -211,6 +233,10 @@ export default function TabsLayout() {
         name="settings"
         options={{
           title: 'Settings',
+          // Setting text should not be bilingual based on user instruction
+          tabBarLabel: ({ color }) => (
+            <Text style={[styles.tabLabel, { color }]}>Settings</Text>
+          ),
           tabBarIcon: ({ focused }) => <TabIcon name="cog" focused={focused} />,
         }}
       />
@@ -219,7 +245,8 @@ export default function TabsLayout() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles() {
+  return StyleSheet.create({
   tabBar: {
     backgroundColor: Colors.surface,
     borderTopWidth: 1,
@@ -281,4 +308,5 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-Bold',
     letterSpacing: 0.5,
   },
-});
+  });
+}

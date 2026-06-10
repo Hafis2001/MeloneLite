@@ -147,3 +147,87 @@ export const getOrderStats = (): { total_orders: number; total_revenue: number; 
     today_revenue: today?.today_revenue ?? 0,
   };
 };
+
+export interface AdvancedStats {
+  totalBills: number;
+  totalRevenue: number;
+  cashRevenue: number;
+  upiRevenue: number;
+  cardRevenue: number;
+}
+
+export const getAdvancedReportStats = (startDate?: string, endDate?: string): AdvancedStats => {
+  const db = getDB();
+  
+  let dateFilter = '';
+  const params: any[] = [];
+  
+  if (startDate && endDate) {
+    if (startDate === endDate) {
+      dateFilter = `WHERE date(created_at) = date(?)`;
+      params.push(startDate);
+    } else {
+      dateFilter = `WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)`;
+      params.push(startDate, endDate);
+    }
+  }
+
+  const orders = db.getAllSync<Order>(
+    `SELECT * FROM orders ${dateFilter}`,
+    params
+  );
+
+  let cashRevenue = 0;
+  let upiRevenue = 0;
+  let cardRevenue = 0;
+  let totalRevenue = 0;
+
+  orders.forEach(o => {
+    totalRevenue += o.grand_total;
+    if (o.is_split_payment) {
+      cashRevenue += (o.cash_amount || 0);
+      upiRevenue += (o.upi_amount || 0);
+    } else {
+      if (o.payment_method === 'Cash') cashRevenue += o.grand_total;
+      else if (o.payment_method === 'UPI') upiRevenue += o.grand_total;
+      else if (o.payment_method === 'Card') cardRevenue += o.grand_total;
+    }
+  });
+
+  return {
+    totalBills: orders.length,
+    totalRevenue,
+    cashRevenue,
+    upiRevenue,
+    cardRevenue
+  };
+};
+
+export const getTopMovedItems = (limit: number = 10, startDate?: string, endDate?: string): { item_name: string; total_quantity: number; total_revenue: number }[] => {
+  const db = getDB();
+  let dateFilter = '';
+  const params: any[] = [];
+  
+  if (startDate && endDate) {
+    if (startDate === endDate) {
+      dateFilter = `WHERE date(o.created_at) = date(?)`;
+      params.push(startDate);
+    } else {
+      dateFilter = `WHERE date(o.created_at) >= date(?) AND date(o.created_at) <= date(?)`;
+      params.push(startDate, endDate);
+    }
+  }
+  
+  params.push(limit);
+
+  return db.getAllSync<{ item_name: string; total_quantity: number; total_revenue: number }>(
+    `SELECT oi.item_name, SUM(oi.quantity) as total_quantity, SUM(oi.subtotal) as total_revenue
+     FROM order_items oi
+     JOIN orders o ON oi.order_id = o.id
+     ${dateFilter}
+     GROUP BY oi.item_name
+     ORDER BY total_quantity DESC
+     LIMIT ?`,
+    params
+  );
+};

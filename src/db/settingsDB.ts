@@ -8,6 +8,14 @@ export interface Settings {
   currency_symbol: string;
   decimal_places?: string;
   receipt_footer: string;
+  require_barcode?: string;
+  enable_arabic?: string;
+  enable_malayalam?: string;
+  enable_tamil?: string;
+  enable_hindi?: string;
+  enable_kannada?: string;
+  auto_generate_image?: string;
+  add_product_by_click?: string;
 }
 
 export const getSetting = (key: string): string => {
@@ -33,6 +41,14 @@ export const getAllSettings = (): Settings => {
     currency_symbol: getSetting('currency_symbol'),
     decimal_places: getSetting('decimal_places') || '2',
     receipt_footer: getSetting('receipt_footer'),
+    require_barcode: getSetting('require_barcode') || '0',
+    enable_arabic: getSetting('enable_arabic') || '0',
+    enable_malayalam: getSetting('enable_malayalam') || '0',
+    enable_tamil: getSetting('enable_tamil') || '0',
+    enable_hindi: getSetting('enable_hindi') || '0',
+    enable_kannada: getSetting('enable_kannada') || '0',
+    auto_generate_image: getSetting('auto_generate_image') || '0',
+    add_product_by_click: getSetting('add_product_by_click') || '0',
   };
 };
 

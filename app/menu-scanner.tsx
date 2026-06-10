@@ -98,8 +98,32 @@ export default function MenuScannerScreen() {
 
     // TRY AI FIRST (STABLE GET)
     try {
-      const truncatedText = text.slice(0, 600);
-      const url = `https://text.pollinations.ai/Return_JSON_array_for_menu_${encodeURIComponent(truncatedText)}?model=mistral`;
+      const truncatedText = text.slice(0, 2500); // Increased limit for full menus
+      const promptStr = `You are a menu parsing AI. The input text is OCR output from a multi-column restaurant menu.
+Because of the columns, the OCR text often lists a group of item names first, followed by a group of their prices.
+
+For example, if you see:
+CategoryName
+Item A
+Item B
+10
+20
+It means:
+- Item A has price 10 (under CategoryName)
+- Item B has price 20 (under CategoryName)
+
+Your job:
+1. Identify the category headers (like "Special Shawaya", "Shawarma", "Rice", "French Fries", "Fresh Juice", "Momos", "Extra add on").
+2. Match the sequence of item names under each category header with the sequence of price numbers that follow them.
+3. Ignore restaurant name, phone numbers, and social media handles.
+4. Each item must have a valid 'name', numeric 'price', and 'category'.
+5. DO NOT write any long reasoning, thoughts, or explanations. Keep your internal reasoning extremely brief (under 50 words) to prevent running out of output tokens. Start your response directly with the JSON object.
+6. Return ONLY a valid JSON object with a key "items" containing the array of objects. Example: {"items": [{"name": "SHAWAYA QTR", "price": 150, "category": "Special Shawaya"}]}.
+
+OCR Text to parse:
+${truncatedText}`;
+      
+      const url = `https://text.pollinations.ai/${encodeURIComponent(promptStr)}?model=openai&json=true`;
       const res = await fetch(url);
       if (res.ok) {
         aiText = await res.text();
@@ -139,9 +163,17 @@ export default function MenuScannerScreen() {
       let cleaned = aiText.trim();
       try {
         const wrapped = JSON.parse(cleaned);
-        if (Array.isArray(wrapped)) parsed = wrapped;
-        else if (wrapped.items && Array.isArray(wrapped.items)) parsed = wrapped.items;
-        else if (wrapped.choices?.[0]?.message?.content) cleaned = wrapped.choices[0].message.content;
+        if (Array.isArray(wrapped)) {
+          parsed = wrapped;
+        } else if (wrapped.items && Array.isArray(wrapped.items)) {
+          parsed = wrapped.items;
+        } else if (wrapped.menu_items && Array.isArray(wrapped.menu_items)) {
+          parsed = wrapped.menu_items;
+        } else if (wrapped.menuItems && Array.isArray(wrapped.menuItems)) {
+          parsed = wrapped.menuItems;
+        } else if (wrapped.choices?.[0]?.message?.content) {
+          cleaned = wrapped.choices[0].message.content;
+        }
       } catch (e) { }
 
       if (!parsed) {
@@ -269,7 +301,7 @@ export default function MenuScannerScreen() {
       } else {
         const color = CAT_COLORS[colorIdx % CAT_COLORS.length];
         colorIdx++;
-        const newId = addCategory(catName, color);
+        const newId = addCategory(catName, null, null, null, null, color);
         catMap[catName] = newId;
       }
     }
@@ -286,7 +318,7 @@ export default function MenuScannerScreen() {
 
         const price = parseFloat(it.price) || 0;
         const catId = catMap[it.category?.trim()] ?? null;
-        const savedId = addItem(code, it.name.trim(), price, catId, null);
+        const savedId = addItem(code, it.name.trim(), null, null, null, null, price, catId, null);
         // background AI image
         const catName = it.category || '';
         ; (async () => {
@@ -294,7 +326,7 @@ export default function MenuScannerScreen() {
             const url = await generateAIImage(it.name.trim(), catName);
             if (url) {
               const saved = getItemById(savedId);
-              dbUpdateItem(savedId, code, it.name.trim(), price, catId, url, saved?.is_available ?? 1);
+              dbUpdateItem(savedId, code, it.name.trim(), null, null, null, null, price, catId, url, saved?.is_available ?? 1);
             }
           } catch (_) { }
         })();
@@ -709,7 +741,7 @@ const styles = StyleSheet.create({
   },
   reviewCategory: {
     fontFamily: 'Poppins-Regular', fontSize: 12, color: Colors.gold,
-    paddingVertical: 0, paddingHorizontal: 0, marginTop: 2,
+    paddingVertical: 0, marginTop: 2,
     backgroundColor: Colors.goldOverlay, borderRadius: 4, paddingHorizontal: 4, alignSelf: 'flex-start',
   },
   reviewDesc: { ...Typography.caption, marginTop: 4, color: Colors.textMuted },
@@ -746,6 +778,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.gold + '20',
     paddingBottom: 4,
   },
-  catHeaderText: { ...Typography.bodyBold, color: Colors.textPrimary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  catHeaderText: { fontFamily: 'Poppins-Bold', fontSize: 14, color: Colors.textPrimary, textTransform: 'uppercase', letterSpacing: 0.5 },
   catHeaderCount: { ...Typography.caption, color: Colors.textMuted, marginLeft: 4 },
 });

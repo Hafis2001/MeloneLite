@@ -1,14 +1,16 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Alert, RefreshControl,
+  Alert, RefreshControl, useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect, router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getAllCategories, deleteCategory, Category } from '../../src/db/categoriesDB';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../../src/constants/theme';
+import { useThemeVersion } from '../../src/context/ThemeContext';
 import AddCategoryModal from '../../src/components/AddCategoryModal';
+import { DualText } from '../../src/components/DualText';
 
 const CATEGORY_COLORS = [
   '#D4A853', '#E57373', '#81C784', '#64B5F6',
@@ -17,10 +19,15 @@ const CATEGORY_COLORS = [
 ];
 
 export default function CategoriesScreen() {
+  const themeVersion = useThemeVersion();
+  const styles = useMemo(() => createStyles(), [themeVersion]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editCategory, setEditCategory] = useState<Category | null>(null);
+
+  const { width, height } = useWindowDimensions();
+  const isLandscapePhone = width > height && width < 1024;
 
   const loadCategories = useCallback(() => {
     setCategories(getAllCategories());
@@ -81,9 +88,10 @@ export default function CategoriesScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={isLandscapePhone ? ['left', 'right'] : ['top']}>
+      <View style={[styles.contentWrapper, isLandscapePhone && { paddingHorizontal: Spacing.xl }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, isLandscapePhone && styles.headerLandscape]}>
         <View>
           <Text style={styles.headerTitle}>Categories</Text>
           <Text style={styles.headerSub}>{categories.length} categories</Text>
@@ -94,7 +102,7 @@ export default function CategoriesScreen() {
           activeOpacity={0.85}
         >
           <MaterialCommunityIcons name="plus" size={22} color={Colors.textInverse} />
-          <Text style={styles.addButtonText}>Add</Text>
+          <DualText text="Add" style={styles.addButtonText} />
         </TouchableOpacity>
       </View>
 
@@ -137,16 +145,20 @@ export default function CategoriesScreen() {
         onClose={() => { setModalVisible(false); setEditCategory(null); }}
         onSaved={() => { setModalVisible(false); setEditCategory(null); loadCategories(); }}
       />
+      </View>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles() {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  contentWrapper: { flex: 1, width: '100%', alignSelf: 'center' },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
   },
+  headerLandscape: { paddingVertical: Spacing.sm },
   headerTitle: { ...Typography.heading2 },
   headerSub: { ...Typography.caption, marginTop: 2 },
   addButton: {
@@ -155,7 +167,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
     ...Shadows.goldGlow,
   },
-  addButtonText: { color: Colors.textInverse, fontFamily: 'Poppins-SemiBold', fontSize: 14 },
+  addButtonText: { color: Colors.textInverse, fontFamily: 'Poppins-SemiBold', fontSize: 14, flexShrink: 1 },
   colorPalette: {
     flexDirection: 'row', paddingHorizontal: Spacing.lg,
     marginBottom: Spacing.md, gap: 8,
@@ -187,4 +199,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, borderRadius: Radius.full,
   },
   emptyBtnText: { color: Colors.textInverse, fontFamily: 'Poppins-SemiBold', fontSize: 14 },
-});
+  });
+}

@@ -2,8 +2,8 @@
   "expo": {
     "name": "MeloneLite",
     "slug": "MeloneLite",
-    "version": "1.1.1",
-    "orientation": "portrait",
+    "version": "2.1.1",
+    "orientation": "default",
     "icon": "./assets/appnew.png",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
@@ -14,7 +14,11 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.melonelite.restaurant"
+      "bundleIdentifier": "com.melonelite.restaurant",
+      "infoPlist": {
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +26,7 @@
         "backgroundColor": "#FFFFFF"
       },
       "package": "com.melonelite.restaurant",
-      "versionCode": 2,
+      "versionCode": 3,
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
@@ -36,6 +40,26 @@
         "android.permission.READ_PHONE_STATE",
         "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            { "scheme": "content", "mimeType": "application/json" },
+            { "scheme": "file", "mimeType": "application/json" },
+            { "scheme": "content", "mimeType": "application/octet-stream" },
+            { "scheme": "file", "mimeType": "application/octet-stream" },
+            { "scheme": "content", "mimeType": "application/x-sqlite3" },
+            { "scheme": "content", "mimeType": "application/vnd.sqlite3" },
+            { "scheme": "content", "mimeType": "application/sql" },
+            { "scheme": "content", "mimeType": "*/*", "pathPattern": ".*\\\\.db" },
+            { "scheme": "content", "mimeType": "*/*", "pathPattern": ".*\\\\.json" }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
       ]
     },
     "web": {

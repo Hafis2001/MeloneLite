@@ -14,7 +14,24 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Modal,
+  ScrollView,
+  KeyboardAvoidingView,
 } from "react-native";
+
+const COUNTRY_CODES = [
+  { code: '+91', name: 'India', flag: '🇮🇳', length: 10 },
+  { code: '+1', name: 'USA/Canada', flag: '🇺🇸', length: 10 },
+  { code: '+44', name: 'UK', flag: '🇬🇧', length: 10 },
+  { code: '+971', name: 'UAE', flag: '🇦🇪', length: 9 },
+  { code: '+966', name: 'Saudi Arabia', flag: '🇸🇦', length: 9 },
+  { code: '+61', name: 'Australia', flag: '🇦🇺', length: 9 },
+  { code: '+65', name: 'Singapore', flag: '🇸🇬', length: 8 },
+  { code: '+974', name: 'Qatar', flag: '🇶🇦', length: 8 },
+  { code: '+965', name: 'Kuwait', flag: '🇰🇼', length: 8 },
+  { code: '+968', name: 'Oman', flag: '🇴🇲', length: 8 },
+  { code: '+973', name: 'Bahrain', flag: '🇧🇭', length: 8 },
+];
 
 // Helper function to manage licenses array
 const addLicenseToStorage = async (licenseData: any) => {
@@ -52,6 +69,8 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
   const [showDemoForm, setShowDemoForm] = useState(false);
   const [demoShopName, setDemoShopName] = useState("");
   const [demoPhone, setDemoPhone] = useState("");
+  const [countryCode, setCountryCode] = useState("+91");
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [demoUsed, setDemoUsed] = useState(false);
   const [demoRemainingDays, setDemoRemainingDays] = useState<number | null>(null);
   const [isUpgradeMode, setIsUpgradeMode] = useState(false);
@@ -60,7 +79,7 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
     if (params.mode === 'upgrade') {
       setIsUpgradeMode(true);
     }
-    initializeApp(params.mode === 'upgrade');
+    initializeApp();
   }, [params.mode]);
 
   const getDeviceId = async () => {
@@ -68,31 +87,22 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
       let id: string | null = null;
 
       if (Platform.OS === "android") {
-        // Method 1: Application.androidId (Synchronous)
-        id = Application.androidId;
-        console.log("Method 1 - Application.androidId:", id);
-
-        if (id && id !== "null" && id !== "" && id !== "unknown") {
-          console.log("✅ Using Application.androidId:", id);
-          return id;
-        }
-
-        // Method 2: Application.getAndroidId() (Asynchronous)
+        // Method 1: Application.getAndroidId() (Asynchronous)
         if (Application.getAndroidId) {
           try {
             id = await Application.getAndroidId();
-            console.log("Method 2 - Application.getAndroidId():", id);
+            console.log("Method 1 - Application.getAndroidId():", id);
 
             if (id && id !== "null" && id !== "" && id !== "unknown") {
               console.log("✅ Using Application.getAndroidId():", id);
               return id;
             }
           } catch (e) {
-            console.log("Method 2 failed:", e);
+            console.log("Method 1 failed:", e);
           }
         }
 
-        // Method 3: Check if we have a previously stored device ID
+        // Method 2: Check if we have a previously stored device ID
         const storedId = await AsyncStorage.getItem("device_hardware_id");
         if (storedId) {
           console.log("✅ Using stored device ID:", storedId);
@@ -729,6 +739,21 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
       return;
     }
 
+    const selectedCountry = COUNTRY_CODES.find(c => c.code === countryCode);
+    const numericPhone = demoPhone.replace(/\D/g, '');
+    
+    if (selectedCountry) {
+      if (numericPhone.length !== selectedCountry.length) {
+        Alert.alert("Invalid Phone Number", `Please enter a valid ${selectedCountry.length}-digit phone number for ${selectedCountry.name}`);
+        return;
+      }
+    } else {
+      if (numericPhone.length < 8) {
+         Alert.alert("Invalid Phone Number", "Please enter a valid phone number");
+         return;
+      }
+    }
+
     setLoading(true);
     try {
       // 1. Check for existing demo
@@ -752,7 +777,8 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
 
       // 2. Send WhatsApp Message (Only if new demo)
       if (!existingExpiry) {
-        const MSG = `melonlite enquiry \nshopname : ${demoShopName}\nphone number : ${demoPhone}`;
+        const fullPhone = `${countryCode} ${demoPhone}`;
+        const MSG = `melonlite enquiry \nshopname : ${demoShopName}\nphone number : ${fullPhone}`;
         const encodedMsg = encodeURIComponent(MSG);
         
         console.log("📤 Sending Demo Enquiry to WhatsApp recipients...");
@@ -816,7 +842,9 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
       end={{ x: 0.5, y: 1 }}
       style={styles.container}
     >
-      <View style={styles.content}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+          <View style={styles.content}>
         {(isAddingLicense || isUpgradeMode) && (
           <TouchableOpacity
             style={styles.backButton}
@@ -880,25 +908,26 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity 
-              style={styles.demoLink} 
-              onPress={() => {
-                if (demoUsed && demoRemainingDays === null) {
-                  Alert.alert("Demo Expired", "Your 5-day demo has expired. Please activate a full license.");
-                } else if (demoRemainingDays !== null) {
-                  handleActivateDemo(); // Resume immediately
-                } else {
-                  setShowDemoForm(true);
-                }
-              }}
-              disabled={loading}
-            >
-              <Text style={styles.demoLinkText}>
-                {demoRemainingDays !== null 
-                  ? `Continue Demo (${demoRemainingDays} days left)` 
-                  : (demoUsed ? "Demo Expired" : "Try Demo for 5 Days")}
-              </Text>
-            </TouchableOpacity>
+            {/* Show demo option only if demo has not been used or is still active */}
+            {(!demoUsed || demoRemainingDays !== null) && (
+              <TouchableOpacity 
+                style={styles.demoLink} 
+                onPress={() => {
+                  if (demoRemainingDays !== null) {
+                    handleActivateDemo(); // Resume immediately
+                  } else {
+                    setShowDemoForm(true);
+                  }
+                }}
+                disabled={loading}
+              >
+                <Text style={styles.demoLinkText}>
+                  {demoRemainingDays !== null 
+                    ? `Continue Demo (${demoRemainingDays} days left)` 
+                    : 'Try Demo for 5 Days'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </>
         ) : (
           <>
@@ -914,15 +943,24 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
               />
               
               <Text style={[styles.inputLabel, { marginTop: 20 }]}>Phone Number</Text>
-              <TextInput
-                style={styles.input}
-                value={demoPhone}
-                onChangeText={setDemoPhone}
-                placeholder="Enter phone number"
-                placeholderTextColor="#666"
-                keyboardType="phone-pad"
-                editable={!loading}
-              />
+              <View style={styles.phoneInputContainer}>
+                <TouchableOpacity 
+                  style={styles.countryCodeBtn}
+                  onPress={() => setShowCountryPicker(true)}
+                  disabled={loading}
+                >
+                  <Text style={styles.countryCodeText}>{countryCode}</Text>
+                </TouchableOpacity>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  value={demoPhone}
+                  onChangeText={setDemoPhone}
+                  placeholder="Enter phone number"
+                  placeholderTextColor="#666"
+                  keyboardType="phone-pad"
+                  editable={!loading}
+                />
+              </View>
             </View>
 
             <TouchableOpacity
@@ -951,6 +989,45 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
           By activating, you agree to our terms of service
         </Text>
       </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Country Code Picker Modal */}
+      <Modal
+        visible={showCountryPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCountryPicker(false)}
+      >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowCountryPicker(false)}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Select Country Code</Text>
+            <ScrollView style={styles.countryList}>
+              {COUNTRY_CODES.map((country, index) => (
+                <TouchableOpacity 
+                  key={index}
+                  style={styles.countryItem}
+                  onPress={() => {
+                    setCountryCode(country.code);
+                    setShowCountryPicker(false);
+                  }}
+                >
+                  <Text style={styles.countryItemFlag}>{country.flag}</Text>
+                  <Text style={styles.countryItemName}>{country.name}</Text>
+                  <Text style={styles.countryItemCode}>{country.code}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity 
+              style={styles.modalCloseBtn}
+              onPress={() => setShowCountryPicker(false)}
+            >
+              <Text style={styles.modalCloseText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
     </LinearGradient>
   );
 }
@@ -963,6 +1040,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     paddingHorizontal: 30,
+    paddingVertical: 40,
   },
   checkingContainer: {
     flex: 1,
@@ -1093,5 +1171,83 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Poppins-SemiBold',
     textDecorationLine: 'underline',
+  },
+  phoneInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  countryCodeBtn: {
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    borderRadius: 12,
+    paddingHorizontal: 15,
+    height: 54,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  countryCodeText: {
+    color: "#fff",
+    fontSize: 16,
+    fontFamily: "Poppins-Medium",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#1C1C1E',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '60%',
+    paddingBottom: 20,
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontFamily: 'Poppins-SemiBold',
+    textAlign: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  countryList: {
+    paddingHorizontal: 20,
+  },
+  countryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  countryItemFlag: {
+    fontSize: 24,
+    marginRight: 15,
+  },
+  countryItemName: {
+    color: '#fff',
+    fontSize: 16,
+    fontFamily: 'Poppins-Regular',
+    flex: 1,
+  },
+  countryItemCode: {
+    color: '#8E8E93',
+    fontSize: 16,
+    fontFamily: 'Poppins-Medium',
+  },
+  modalCloseBtn: {
+    marginTop: 15,
+    marginHorizontal: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  modalCloseText: {
+    color: '#fff',
+    fontSize: 16,
+    fontFamily: 'Poppins-SemiBold',
   },
 });

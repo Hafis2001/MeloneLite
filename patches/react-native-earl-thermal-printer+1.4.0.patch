@@ -1,5 +1,5 @@
 diff --git a/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/BLEPrinterAdapter.java b/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/BLEPrinterAdapter.java
-index 28c4a23..de0e0b1 100644
+index 28c4a23..c667686 100644
 --- a/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/BLEPrinterAdapter.java
 +++ b/node_modules/react-native-earl-thermal-printer/android/src/main/java/com/pinmi/react/printer/adapter/BLEPrinterAdapter.java
 @@ -15,6 +15,7 @@ import com.facebook.react.bridge.Arguments;
@@ -10,7 +10,7 @@ index 28c4a23..de0e0b1 100644
  import com.google.zxing.EncodeHintType;
  import com.google.zxing.WriterException;
  import com.google.zxing.common.BitMatrix;
-@@ -52,6 +53,245 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+@@ -52,6 +53,495 @@ public class BLEPrinterAdapter implements PrinterAdapter {
      private final static byte[] LINE_FEED = new byte[] { 0x0A };
      private static byte[] CENTER_ALIGN = { 0x1B, 0X61, 0X31 };
  
@@ -19,6 +19,189 @@ index 28c4a23..de0e0b1 100644
 +    private static boolean isBuiltInPrinterChecked = false;
 +    private static boolean isBuiltInPrinterPresent = false;
 +    private static boolean useBuiltInPrinter = false;
++
++    private static class PrintJobElement {
++        int type; // 0 = text, 1 = bitmap, 2 = qr code
++        java.util.List<Line> lines;
++        Bitmap bitmap;
++        int bitmapWidth;
++        String qrCode;
++        double qrSize;
++    }
++
++    private final java.util.List<PrintJobElement> pendingPrintJob = new java.util.ArrayList<>();
++    private final android.os.Handler printHandler = new android.os.Handler(android.os.Looper.getMainLooper());
++    private Runnable printRunnable = null;
++
++    private synchronized void queuePrintJobElement(final PrintJobElement element, final Promise promise) {
++        pendingPrintJob.add(element);
++        
++        if (printRunnable != null) {
++            printHandler.removeCallbacks(printRunnable);
++        }
++        
++        printRunnable = new Runnable() {
++            @Override
++            public void run() {
++                executeCombinedPrintJob();
++            }
++        };
++        
++        // Wait 300ms for subsequent print elements (logo, text, footer/QR)
++        printHandler.postDelayed(printRunnable, 300);
++        
++        // Resolve immediately so JS is not blocked and can queue the next element
++        if (promise != null) {
++            promise.resolve(null);
++        }
++    }
++
++    private synchronized void executeCombinedPrintJob() {
++        final java.util.List<PrintJobElement> jobsToRun = new java.util.ArrayList<>(pendingPrintJob);
++        pendingPrintJob.clear();
++        printRunnable = null;
++        
++        if (jobsToRun.isEmpty()) {
++            return;
++        }
++        
++        new Thread(new Runnable() {
++            @Override
++            public void run() {
++                try {
++                    java.lang.reflect.Method openMethod = ubxPrinterClass.getMethod("open");
++                    java.lang.reflect.Method setupPageMethod = ubxPrinterClass.getMethod("setupPage", int.class, int.class);
++                    java.lang.reflect.Method drawTextExMethod = ubxPrinterClass.getMethod("drawTextEx", 
++                        String.class, int.class, int.class, int.class, int.class, String.class, int.class, int.class, int.class, int.class);
++                    java.lang.reflect.Method drawBitmapMethod = ubxPrinterClass.getMethod("drawBitmap", Bitmap.class, int.class, int.class);
++                    java.lang.reflect.Method printPageMethod = ubxPrinterClass.getMethod("printPage", int.class);
++                    java.lang.reflect.Method closeMethod = ubxPrinterClass.getMethod("close");
++                    java.lang.reflect.Method paperFeedMethod = null;
++                    try {
++                        paperFeedMethod = ubxPrinterClass.getMethod("paperFeed", int.class);
++                    } catch (NoSuchMethodException e) {
++                        // Ignore
++                    }
++
++                    // Open printer
++                    openMethod.invoke(ubxPrinterInstance);
++
++                    int paperWidth = 384;
++                    
++                    // Auto-size font based on longest line to fill paper width.
++                    // At 18px monospace, 32 chars fills 384px → charWidth = 18*0.667 ≈ 12px → fontSize = 576/maxLen
++                    int maxLineLen = 24; // Default (2-inch)
++                    for (PrintJobElement job : jobsToRun) {
++                        if (job.type == 0) {
++                            for (Line line : job.lines) {
++                                if (line.text.length() > maxLineLen) {
++                                    maxLineLen = line.text.length();
++                                }
++                            }
++                        }
++                    }
++                    // fontSize = 576 / maxLineLen, clamped 12–26px
++                    int normalFontSize = Math.max(12, Math.min(26, 576 / maxLineLen));
++                    int doubleFontSize = Math.max(18, Math.min(38, normalFontSize * 2));
++                    int normalLineH = normalFontSize + 6;
++                    int doubleLineH = doubleFontSize + 10;
++                    int totalHeight = 10; // Top margin
++                    for (PrintJobElement job : jobsToRun) {
++                        if (job.type == 0) { // Text
++                            for (Line line : job.lines) {
++                                int h = line.doubleHeight ? doubleLineH : normalLineH;
++                                totalHeight += h;
++                            }
++                        } else if (job.type == 1) { // Bitmap Image
++                            Bitmap scaledBitmap = job.bitmap;
++                            if (job.bitmap.getWidth() > paperWidth) {
++                                double ratio = (double) paperWidth / job.bitmap.getWidth();
++                                int newHeight = (int) (job.bitmap.getHeight() * ratio);
++                                scaledBitmap = Bitmap.createScaledBitmap(job.bitmap, paperWidth, newHeight, true);
++                            } else if (job.bitmapWidth < paperWidth) {
++                                double ratio = (double) job.bitmapWidth / job.bitmap.getWidth();
++                                int newHeight = (int) (job.bitmap.getHeight() * ratio);
++                                scaledBitmap = Bitmap.createScaledBitmap(job.bitmap, job.bitmapWidth, newHeight, true);
++                            }
++                            totalHeight += scaledBitmap.getHeight() + 15;
++                            job.bitmap = scaledBitmap; // Cache scaled bitmap
++                        } else if (job.type == 2) { // QR Code
++                            int size = (int) job.qrSize;
++                            if (size > paperWidth) {
++                                size = paperWidth;
++                            }
++                            Bitmap qrBitmap = TextToQrImageEncode(job.qrCode, size);
++                            if (qrBitmap != null) {
++                                totalHeight += qrBitmap.getHeight() + 15;
++                                job.bitmap = qrBitmap; // Cache QR bitmap
++                            }
++                        }
++                    }
++                    totalHeight += 40; // Bottom margin
++
++                    // Initialize the single combined page canvas
++                    setupPageMethod.invoke(ubxPrinterInstance, paperWidth, totalHeight);
++
++                    // Second pass: Draw all elements sequentially
++                    int currentY = 10;
++                    for (PrintJobElement job : jobsToRun) {
++                        if (job.type == 0) { // Text
++                            for (Line line : job.lines) {
++                                int fontSize = line.doubleHeight ? doubleFontSize : normalFontSize;
++                                int fontStyle = line.bold ? 1 : 0;
++                                int h = line.doubleHeight ? doubleLineH : normalLineH;
++
++                                // Character width estimate for monospace: fontSize * 0.6
++                                int textWidth = (int) (line.text.length() * fontSize * 0.6);
++                                int x = 0;
++                                if (line.alignment == 1) {
++                                    x = Math.max(0, (paperWidth - textWidth) / 2);
++                                } else if (line.alignment == 2) {
++                                    x = Math.max(0, paperWidth - textWidth);
++                                }
++
++                                drawTextExMethod.invoke(ubxPrinterInstance, 
++                                    line.text, 
++                                    x, 
++                                    currentY, 
++                                    paperWidth, 
++                                    h + 4, 
++                                    "monospace", 
++                                    fontSize, 
++                                    0, // rotate
++                                    fontStyle, // style
++                                    0 // format
++                                );
++                                currentY += h;
++                            }
++                        } else if (job.type == 1 || job.type == 2) { // Bitmap or QR Code
++                            if (job.bitmap != null) {
++                                int x = (paperWidth - job.bitmap.getWidth()) / 2;
++                                drawBitmapMethod.invoke(ubxPrinterInstance, job.bitmap, x, currentY);
++                                currentY += job.bitmap.getHeight() + 15;
++                            }
++                        }
++                    }
++
++                    // Print page
++                    printPageMethod.invoke(ubxPrinterInstance, 0);
++
++                    if (paperFeedMethod != null) {
++                        try {
++                            paperFeedMethod.invoke(ubxPrinterInstance, 40);
++                        } catch (Exception e) {
++                            // Ignore
++                        }
++                    }
++
++                    closeMethod.invoke(ubxPrinterInstance);
++                } catch (Exception e) {
++                    e.printStackTrace();
++                    Log.e("BLEPrinterAdapter", "Error executing combined built-in print job", e);
++                }
++            }
++        }).start();
++    }
 +
 +    private static final String[] UBX_PRINTER_CLASSES = {
 +        "android.device.PrinterManager",
@@ -90,18 +273,29 @@ index 28c4a23..de0e0b1 100644
 +        while (i < bytes.length) {
 +            byte b = bytes[i];
 +            if (b == 0x1B) { // ESC
-+                if (i + 2 < bytes.length) {
++                if (i + 1 < bytes.length) {
 +                    byte cmd = bytes[i + 1];
-+                    byte val = bytes[i + 2];
-+                    if (cmd == 0x45) { // Bold 'E'
++                    if (cmd == 0x40 || cmd == 0x32 || cmd == 0x69 || cmd == 0x6D) { // ESC @, ESC 2, ESC i, ESC m
++                        i += 2;
++                        continue;
++                    } else if (cmd == 0x70) { // ESC p m t1 t2
++                        i += Math.min(5, bytes.length - i);
++                        continue;
++                    } else if (cmd == 0x42) { // ESC B n t
++                        i += Math.min(4, bytes.length - i);
++                        continue;
++                    } else if (cmd == 0x45) { // Bold 'E'
 +                        if (lineBytes.size() > 0) {
 +                            String text = "";
 +                            try { text = lineBytes.toString("UTF-8"); } catch (Exception e) {}
 +                            lines.add(new StyledLine(text, alignment, bold, doubleHeight, doubleWidth));
 +                            lineBytes.reset();
 +                        }
-+                        bold = (val == 0x01 || val == 0x31);
-+                        i += 3;
++                        if (i + 2 < bytes.length) {
++                            byte val = bytes[i + 2];
++                            bold = (val == 0x01 || val == 0x31);
++                        }
++                        i += Math.min(3, bytes.length - i);
 +                        continue;
 +                    } else if (cmd == 0x61) { // Alignment 'a'
 +                        if (lineBytes.size() > 0) {
@@ -110,29 +304,63 @@ index 28c4a23..de0e0b1 100644
 +                            lines.add(new StyledLine(text, alignment, bold, doubleHeight, doubleWidth));
 +                            lineBytes.reset();
 +                        }
-+                        if (val == 0x00 || val == 0x30) alignment = 0;
-+                        else if (val == 0x01 || val == 0x31) alignment = 1;
-+                        else if (val == 0x02 || val == 0x32) alignment = 2;
-+                        i += 3;
++                        if (i + 2 < bytes.length) {
++                            byte val = bytes[i + 2];
++                            if (val == 0x00 || val == 0x30) alignment = 0;
++                            else if (val == 0x01 || val == 0x31) alignment = 1;
++                            else if (val == 0x02 || val == 0x32) alignment = 2;
++                        }
++                        i += Math.min(3, bytes.length - i);
++                        continue;
++                    } else {
++                        // generic ESC command (3 bytes)
++                        i += Math.min(3, bytes.length - i);
 +                        continue;
 +                    }
++                } else {
++                    i += 1;
++                    continue;
 +                }
 +            } else if (b == 0x1D) { // GS
-+                if (i + 2 < bytes.length) {
++                if (i + 1 < bytes.length) {
 +                    byte cmd = bytes[i + 1];
-+                    byte val = bytes[i + 2];
-+                    if (cmd == 0x21) { // Font size '!'
++                    if (cmd == 0x21) { // GS ! n
 +                        if (lineBytes.size() > 0) {
 +                            String text = "";
 +                            try { text = lineBytes.toString("UTF-8"); } catch (Exception e) {}
 +                            lines.add(new StyledLine(text, alignment, bold, doubleHeight, doubleWidth));
 +                            lineBytes.reset();
 +                        }
-+                        doubleWidth = (val & 0xF0) > 0;
-+                        doubleHeight = (val & 0x0F) > 0;
-+                        i += 3;
++                        if (i + 2 < bytes.length) {
++                            byte val = bytes[i + 2];
++                            doubleWidth = (val & 0xF0) > 0;
++                            doubleHeight = (val & 0x0F) > 0;
++                        }
++                        i += Math.min(3, bytes.length - i);
++                        continue;
++                    } else {
++                        // generic GS command (3 bytes)
++                        i += Math.min(3, bytes.length - i);
 +                        continue;
 +                    }
++                } else {
++                    i += 1;
++                    continue;
++                }
++            } else if (b == 0x1C) { // FS
++                if (i + 1 < bytes.length) {
++                    byte cmd = bytes[i + 1];
++                    if (cmd == 0x26 || cmd == 0x2E) { // FS &, FS . (2 bytes)
++                        i += 2;
++                        continue;
++                    } else {
++                        // generic FS command (3 bytes)
++                        i += Math.min(3, bytes.length - i);
++                        continue;
++                    }
++                } else {
++                    i += 1;
++                    continue;
 +                }
 +            } else if (b == 0x0A) { // LF
 +                String text = "";
@@ -208,10 +436,24 @@ index 28c4a23..de0e0b1 100644
 +        // Open printer
 +        openMethod.invoke(ubxPrinterInstance);
 +
++        // Auto-size font based on longest line to fill paper width.
++        // At 18px monospace, 32 chars fills 384px → charWidth = 18*0.667 ≈ 12px → fontSize = 576/maxLen
++        int maxLineLen = 24;
++        for (Line line : lines) {
++            if (line.text.length() > maxLineLen) {
++                maxLineLen = line.text.length();
++            }
++        }
++        // fontSize = 576 / maxLineLen, clamped 12–26px
++        int normalFontSize = Math.max(12, Math.min(26, 576 / maxLineLen));
++        int doubleFontSize = Math.max(18, Math.min(38, normalFontSize * 2));
++        int normalLineH = normalFontSize + 6;
++        int doubleLineH = doubleFontSize + 10;
++
 +        int paperWidth = 384;
 +        int currentY = 10;
 +        for (Line line : lines) {
-+            int h = line.doubleHeight ? 48 : 28;
++            int h = line.doubleHeight ? doubleLineH : normalLineH;
 +            currentY += h;
 +        }
 +        int pageHeight = currentY + 40;
@@ -220,22 +462,30 @@ index 28c4a23..de0e0b1 100644
 +
 +        int y = 10;
 +        for (Line line : lines) {
-+            int fontSize = line.doubleHeight ? 36 : 24;
++            int fontSize = line.doubleHeight ? doubleFontSize : normalFontSize;
 +            int fontStyle = line.bold ? 1 : 0;
-+            int alignment = line.alignment;
-+            int h = line.doubleHeight ? 48 : 28;
++            int h = line.doubleHeight ? doubleLineH : normalLineH;
++
++            // Character width estimate for monospace: fontSize * 0.6
++            int textWidth = (int) (line.text.length() * fontSize * 0.6);
++            int x = 0;
++            if (line.alignment == 1) {
++                x = Math.max(0, (paperWidth - textWidth) / 2);
++            } else if (line.alignment == 2) {
++                x = Math.max(0, paperWidth - textWidth);
++            }
 +
 +            drawTextExMethod.invoke(ubxPrinterInstance, 
 +                line.text, 
-+                0, 
++                x, 
 +                y, 
 +                paperWidth, 
-+                h + 6, 
-+                null, 
++                h + 4, 
++                "monospace", 
 +                fontSize, 
-+                fontStyle, 
-+                0, 
-+                alignment
++                0, // rotate (0 = no rotation)
++                fontStyle, // style (1 = bold, 0 = normal)
++                0 // format (0 = word wrap)
 +            );
 +            y += h;
 +        }
@@ -256,7 +506,7 @@ index 28c4a23..de0e0b1 100644
      private BLEPrinterAdapter() {
      }
  
-@@ -65,6 +305,12 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+@@ -65,6 +555,12 @@ public class BLEPrinterAdapter implements PrinterAdapter {
      @Override
      public void init(ReactApplicationContext reactContext, Promise promise) {
          this.mContext = reactContext;
@@ -269,7 +519,7 @@ index 28c4a23..de0e0b1 100644
          BluetoothAdapter bluetoothAdapter = getBTAdapter();
          if (bluetoothAdapter == null) {
              promise.reject("ERR_BT_ADAPTER", "No bluetooth adapter available");
-@@ -83,25 +329,40 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+@@ -83,25 +579,49 @@ public class BLEPrinterAdapter implements PrinterAdapter {
  
      @Override
      public void getDeviceList(Promise promise) {
@@ -294,11 +544,20 @@ index 28c4a23..de0e0b1 100644
 +            array.pushMap(builtinMap);
 +        }
 +        
-+        BluetoothAdapter bluetoothAdapter = getBTAdapter();
-+        if (bluetoothAdapter != null && bluetoothAdapter.isEnabled()) {
-+            Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
-+            for (BluetoothDevice device : pairedDevices) {
-+                array.pushMap(new BLEPrinterDevice(device).toRNWritableMap());
++        try {
++            BluetoothAdapter bluetoothAdapter = getBTAdapter();
++            if (bluetoothAdapter != null && bluetoothAdapter.isEnabled()) {
++                Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
++                for (BluetoothDevice device : pairedDevices) {
++                    array.pushMap(new BLEPrinterDevice(device).toRNWritableMap());
++                }
++            }
++        } catch (SecurityException e) {
++            Log.e(LOG_TAG, "SecurityException: Missing BLUETOOTH_CONNECT permission", e);
++            // If no built-in printer is present and we have a security exception, reject with a clear message
++            if (!isBuiltInPrinterPresent) {
++                promise.reject("ERR_MISSING_PERMISSION", "Bluetooth permission BLUETOOTH_CONNECT is missing.");
++                return;
 +            }
          }
          promise.resolve(array);
@@ -322,46 +581,90 @@ index 28c4a23..de0e0b1 100644
          BluetoothAdapter bluetoothAdapter = getBTAdapter();
          if (bluetoothAdapter == null) {
              promise.reject("ERR_BT_ADAPTER", "No bluetooth adapter available");
-@@ -111,7 +372,6 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+@@ -111,30 +631,36 @@ public class BLEPrinterAdapter implements PrinterAdapter {
              promise.reject("ERR_BT_DISABLED", "Bluetooth is not enabled");
              return;
          }
 -        BLEPrinterDeviceId blePrinterDeviceId = (BLEPrinterDeviceId) printerDeviceId;
-         if (this.mBluetoothDevice != null) {
-             if (this.mBluetoothDevice.getAddress().equals(blePrinterDeviceId.getInnerMacAddress())
-                     && this.mBluetoothSocket != null) {
-@@ -166,6 +426,30 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+-        if (this.mBluetoothDevice != null) {
+-            if (this.mBluetoothDevice.getAddress().equals(blePrinterDeviceId.getInnerMacAddress())
+-                    && this.mBluetoothSocket != null) {
+-                Log.v(LOG_TAG, "do not need to reconnect");
+-                promise.resolve(new BLEPrinterDevice(this.mBluetoothDevice).toRNWritableMap());
+-                return;
+-            } else {
+-                closeConnectionIfExists();
+-            }
+-        }
+-        Set<BluetoothDevice> pairedDevices = getBTAdapter().getBondedDevices();
+-        for (BluetoothDevice device : pairedDevices) {
+-            if (device.getAddress().equals(blePrinterDeviceId.getInnerMacAddress())) {
+-                try {
+-                    connectBluetoothDevice(device);
++        
++        try {
++            if (this.mBluetoothDevice != null) {
++                if (this.mBluetoothDevice.getAddress().equals(blePrinterDeviceId.getInnerMacAddress())
++                        && this.mBluetoothSocket != null) {
++                    Log.v(LOG_TAG, "do not need to reconnect");
+                     promise.resolve(new BLEPrinterDevice(this.mBluetoothDevice).toRNWritableMap());
+                     return;
+-                } catch (IOException e) {
+-                    e.printStackTrace();
+-                    promise.reject("ERR_BT_CONNECT", e.getMessage());
+-                    return;
++                } else {
++                    closeConnectionIfExists();
++                }
++            }
++            Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
++            for (BluetoothDevice device : pairedDevices) {
++                if (device.getAddress().equals(blePrinterDeviceId.getInnerMacAddress())) {
++                    try {
++                        connectBluetoothDevice(device);
++                        promise.resolve(new BLEPrinterDevice(this.mBluetoothDevice).toRNWritableMap());
++                        return;
++                    } catch (IOException e) {
++                        e.printStackTrace();
++                        promise.reject("ERR_BT_CONNECT", e.getMessage());
++                        return;
++                    }
+                 }
+             }
++        } catch (SecurityException e) {
++            Log.e(LOG_TAG, "SecurityException during selectDevice", e);
++            promise.reject("ERR_MISSING_PERMISSION", "Bluetooth permission BLUETOOTH_CONNECT is missing.");
++            return;
+         }
+         String errorText = "Can not find the specified printing device, please perform Bluetooth pairing in the system settings first.";
+         Toast.makeText(this.mContext, errorText, Toast.LENGTH_LONG).show();
+@@ -166,6 +692,25 @@ public class BLEPrinterAdapter implements PrinterAdapter {
  
      @Override
      public void printRawData(String rawBase64Data, Promise promise) {
 +        checkBuiltInPrinter();
 +        if (useBuiltInPrinter && isBuiltInPrinterPresent) {
-+            final String rawData = rawBase64Data;
-+            Log.v(LOG_TAG, "start to print raw data via built-in printer");
-+            new Thread(new Runnable() {
-+                @Override
-+                public void run() {
-+                    try {
-+                        byte[] bytes = Base64.decode(rawData, Base64.DEFAULT);
-+                        printToBuiltIn(bytes);
-+                        promise.resolve(null);
-+                    } catch (Exception e) {
-+                        e.printStackTrace();
-+                        String errorMsg = e.getMessage();
-+                        if (e.getCause() != null) {
-+                            errorMsg += " | Cause: " + e.getCause().toString();
-+                        }
-+                        promise.reject("ERR_BUILTIN_PRINT", errorMsg);
-+                    }
-+                }
-+            }).start();
++            try {
++                byte[] bytes = Base64.decode(rawBase64Data, Base64.DEFAULT);
++                java.util.List<StyledLine> segments = parseEscPos(bytes);
++                java.util.List<Line> lines = groupLines(segments);
++
++                PrintJobElement job = new PrintJobElement();
++                job.type = 0;
++                job.lines = lines;
++
++                queuePrintJobElement(job, promise);
++            } catch (Exception e) {
++                e.printStackTrace();
++                promise.reject("ERR_BUILTIN_PRINT", e.getMessage());
++            }
 +            return;
 +        }
 +
          if (this.mBluetoothSocket == null) {
              promise.reject("ERR_NO_CONN", "Bluetooth connection is not built, may be you forgot to connectPrinter");
              return;
-@@ -192,6 +476,64 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+@@ -192,6 +737,64 @@ public class BLEPrinterAdapter implements PrinterAdapter {
      }
  
      public static Bitmap getBitmapFromURL(String src) {
@@ -426,7 +729,7 @@ index 28c4a23..de0e0b1 100644
          try {
              URL url = new URL(src);
              HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-@@ -199,31 +541,176 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+@@ -199,31 +802,127 @@ public class BLEPrinterAdapter implements PrinterAdapter {
              connection.connect();
              InputStream input = connection.getInputStream();
              Bitmap myBitmap = BitmapFactory.decodeStream(input);
@@ -541,61 +844,12 @@ index 28c4a23..de0e0b1 100644
 +        final int maxSize = imageWidth > 0 ? (int) imageWidth : 200;
 +
 +        if (useBuiltInPrinter && isBuiltInPrinterPresent) {
-+            final Bitmap finalBitmap = bitmapImage;
-+            new Thread(new Runnable() {
-+                @Override
-+                public void run() {
-+                    try {
-+                        java.lang.reflect.Method openMethod = ubxPrinterClass.getMethod("open");
-+                        java.lang.reflect.Method setupPageMethod = ubxPrinterClass.getMethod("setupPage", int.class, int.class);
-+                        java.lang.reflect.Method drawBitmapMethod = ubxPrinterClass.getMethod("drawBitmap", Bitmap.class, int.class, int.class);
-+                        java.lang.reflect.Method printPageMethod = ubxPrinterClass.getMethod("printPage", int.class);
-+                        java.lang.reflect.Method closeMethod = ubxPrinterClass.getMethod("close");
++            PrintJobElement job = new PrintJobElement();
++            job.type = 1;
++            job.bitmap = bitmapImage;
++            job.bitmapWidth = maxSize;
 +
-+                        openMethod.invoke(ubxPrinterInstance);
-+
-+                        int paperWidth = 384;
-+                        Bitmap scaledBitmap = finalBitmap;
-+                        if (finalBitmap.getWidth() > paperWidth) {
-+                            double ratio = (double) paperWidth / finalBitmap.getWidth();
-+                            int newHeight = (int) (finalBitmap.getHeight() * ratio);
-+                            scaledBitmap = Bitmap.createScaledBitmap(finalBitmap, paperWidth, newHeight, true);
-+                        } else if (maxSize < paperWidth) {
-+                            // Scale down if maxSize is specified smaller
-+                            double ratio = (double) maxSize / finalBitmap.getWidth();
-+                            int newHeight = (int) (finalBitmap.getHeight() * ratio);
-+                            scaledBitmap = Bitmap.createScaledBitmap(finalBitmap, maxSize, newHeight, true);
-+                        }
-+
-+                        int x = (paperWidth - scaledBitmap.getWidth()) / 2;
-+                        int pageHeight = scaledBitmap.getHeight() + 20;
-+
-+                        setupPageMethod.invoke(ubxPrinterInstance, paperWidth, pageHeight);
-+                        drawBitmapMethod.invoke(ubxPrinterInstance, scaledBitmap, x, 10);
-+                        printPageMethod.invoke(ubxPrinterInstance, 0);
-+
-+                        java.lang.reflect.Method paperFeedMethod = null;
-+                        try {
-+                            paperFeedMethod = ubxPrinterClass.getMethod("paperFeed", int.class);
-+                        } catch (NoSuchMethodException e) {
-+                            // Ignore
-+                        }
-+                        if (paperFeedMethod != null) {
-+                            try { paperFeedMethod.invoke(ubxPrinterInstance, 30); } catch (Exception e) {}
-+                        }
-+
-+                        closeMethod.invoke(ubxPrinterInstance);
-+                        promise.resolve(null);
-+                    } catch (Exception e) {
-+                        e.printStackTrace();
-+                        String errorMsg = e.getMessage();
-+                        if (e.getCause() != null) {
-+                            errorMsg += " | Cause: " + e.getCause().toString();
-+                        }
-+                        promise.reject("ERR_PRINT_IMAGE", errorMsg);
-+                    }
-+                }
-+            }).start();
++            queuePrintJobElement(job, promise);
 +            return;
 +        }
 +
@@ -609,7 +863,7 @@ index 28c4a23..de0e0b1 100644
  
          try {
              int[][] pixels = getPixelsSlow(bitmapImage, maxSize);
-@@ -242,7 +729,6 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+@@ -242,7 +941,6 @@ public class BLEPrinterAdapter implements PrinterAdapter {
                  printerOutputStream.write(LINE_FEED);
              }
              printerOutputStream.write(SET_LINE_SPACE_32);
@@ -617,62 +871,26 @@ index 28c4a23..de0e0b1 100644
              printerOutputStream.flush();
              promise.resolve(null);
          } catch (IOException e) {
-@@ -261,6 +747,54 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+@@ -261,6 +959,18 @@ public class BLEPrinterAdapter implements PrinterAdapter {
              promise.reject("ERR_QR", "QR code generation failed");
              return;
          }
 +
 +        checkBuiltInPrinter();
 +        if (useBuiltInPrinter && isBuiltInPrinterPresent) {
-+            new Thread(new Runnable() {
-+                @Override
-+                public void run() {
-+                    try {
-+                        java.lang.reflect.Method openMethod = ubxPrinterClass.getMethod("open");
-+                        java.lang.reflect.Method setupPageMethod = ubxPrinterClass.getMethod("setupPage", int.class, int.class);
-+                        java.lang.reflect.Method drawBitmapMethod = ubxPrinterClass.getMethod("drawBitmap", Bitmap.class, int.class, int.class);
-+                        java.lang.reflect.Method printPageMethod = ubxPrinterClass.getMethod("printPage", int.class);
-+                        java.lang.reflect.Method closeMethod = ubxPrinterClass.getMethod("close");
++            PrintJobElement job = new PrintJobElement();
++            job.type = 2;
++            job.qrCode = qrCode;
++            job.qrSize = size;
 +
-+                        openMethod.invoke(ubxPrinterInstance);
-+
-+                        int paperWidth = 384;
-+                        int x = (paperWidth - bitmapImage.getWidth()) / 2;
-+                        int pageHeight = bitmapImage.getHeight() + 20;
-+
-+                        setupPageMethod.invoke(ubxPrinterInstance, paperWidth, pageHeight);
-+                        drawBitmapMethod.invoke(ubxPrinterInstance, bitmapImage, x, 10);
-+                        printPageMethod.invoke(ubxPrinterInstance, 0);
-+
-+                        java.lang.reflect.Method paperFeedMethod = null;
-+                        try {
-+                            paperFeedMethod = ubxPrinterClass.getMethod("paperFeed", int.class);
-+                        } catch (NoSuchMethodException e) {
-+                            // Ignore
-+                        }
-+                        if (paperFeedMethod != null) {
-+                            try { paperFeedMethod.invoke(ubxPrinterInstance, 30); } catch (Exception e) {}
-+                        }
-+
-+                        closeMethod.invoke(ubxPrinterInstance);
-+                        promise.resolve(null);
-+                    } catch (Exception e) {
-+                        e.printStackTrace();
-+                        String errorMsg = e.getMessage();
-+                        if (e.getCause() != null) {
-+                            errorMsg += " | Cause: " + e.getCause().toString();
-+                        }
-+                        promise.reject("ERR_PRINT_QR", errorMsg);
-+                    }
-+                }
-+            }).start();
++            queuePrintJobElement(job, promise);
 +            return;
 +        }
 +
          if (this.mBluetoothSocket == null) {
              promise.reject("ERR_NO_CONN", "Bluetooth connection is not built, may be you forgot to connectPrinter");
              return;
-@@ -347,7 +881,7 @@ public class BLEPrinterAdapter implements PrinterAdapter {
+@@ -347,7 +1057,7 @@ public class BLEPrinterAdapter implements PrinterAdapter {
          return slices;
      }
  

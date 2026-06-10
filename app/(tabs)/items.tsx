@@ -1,7 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Alert, RefreshControl, Image,
+  Alert, RefreshControl, Image, TextInput, useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect, router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -9,14 +9,32 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { getAllItems, deleteItem, Item } from '../../src/db/itemsDB';
 import { formatCurrency } from '../../src/utils/currencyUtils';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../../src/constants/theme';
+import { getSetting } from '../../src/db/settingsDB';
+import { DualText } from '../../src/components/DualText';
+import { useThemeVersion } from '../../src/context/ThemeContext';
 
 export default function ItemsScreen() {
+  const themeVersion = useThemeVersion();
+  const styles = useMemo(() => createStyles(), [themeVersion]);
   const [items, setItems] = useState<Item[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const { width, height } = useWindowDimensions();
+  const isLandscapePhone = width > height && width < 1024;
 
   const loadItems = useCallback(() => {
     setItems(getAllItems());
   }, []);
+
+  const filteredItems = useMemo(() => {
+    if (!searchQuery.trim()) return items;
+    const q = searchQuery.toLowerCase();
+    return items.filter(i =>
+      i.item_name.toLowerCase().includes(q) ||
+      (i.item_code && i.item_code.toLowerCase().includes(q))
+    );
+  }, [items, searchQuery]);
 
   useFocusEffect(useCallback(() => {
     loadItems();
@@ -62,13 +80,27 @@ export default function ItemsScreen() {
           </View>
           {item.category_name && (
             <View style={[styles.catChip, { borderColor: item.category_color || Colors.gold }]}>
-              <Text style={[styles.catText, { color: item.category_color || Colors.gold }]}>
-                {item.category_name}
-              </Text>
+              <DualText 
+                text={item.category_name} 
+                arabicText={item.category_name_ar} 
+                malayalamText={item.category_name_ml}
+                tamilText={item.category_name_ta}
+                hindiText={item.category_name_hi}
+                style={[styles.catText, { color: item.category_color || Colors.gold }]} 
+              />
             </View>
           )}
         </View>
-        <Text style={styles.itemName} numberOfLines={1}>{item.item_name}</Text>
+        <DualText 
+          text={item.item_name} 
+          arabicText={item.item_name_ar} 
+          malayalamText={item.item_name_ml}
+          tamilText={item.item_name_ta}
+          hindiText={item.item_name_hi}
+          kannadaText={item.item_name_kn}
+          style={styles.itemName} 
+          numberOfLines={1} 
+        />
         <Text style={styles.itemRate}>{formatCurrency(item.rate)}</Text>
       </View>
       <View style={styles.itemActions}>
@@ -89,12 +121,12 @@ export default function ItemsScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={isLandscapePhone ? ['left', 'right'] : ['top']}>
       <View style={styles.contentWrapper}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, isLandscapePhone && styles.headerLandscape]}>
         <View>
-          <Text style={styles.headerTitle}>ORDER</Text>
+          <DualText text="Items" style={styles.headerTitle} />
           <Text style={styles.headerSub}>{items.length} items in menu</Text>
         </View>
         <View style={styles.headerActions}>
@@ -104,7 +136,7 @@ export default function ItemsScreen() {
             activeOpacity={0.85}
           >
             <MaterialCommunityIcons name="text-recognition" size={18} color={Colors.gold} />
-            <Text style={styles.scanButtonText}>Scan</Text>
+            <DualText text="Scan" style={styles.scanButtonText} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.addButton}
@@ -112,27 +144,52 @@ export default function ItemsScreen() {
             activeOpacity={0.85}
           >
             <MaterialCommunityIcons name="plus" size={20} color={Colors.textInverse} />
-            <Text style={styles.addButtonText}>Add Item</Text>
+            <DualText text="Add" style={styles.addButtonText} />
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Search Bar */}
+      {items.length > 0 && (
+        <View style={styles.searchContainer}>
+          <MaterialCommunityIcons name="magnify" size={20} color={Colors.textMuted} style={{ marginRight: 8 }} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder={getSetting('enable_arabic') === '1' ? 'Search items... / ابحث عن العناصر...' : getSetting('enable_malayalam') === '1' ? 'Search items... / സാധനങ്ങൾ തിരയുക...' : getSetting('enable_tamil') === '1' ? 'Search items... / பொருட்களை தேடு...' : 'Search items...'}
+            placeholderTextColor={Colors.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <MaterialCommunityIcons name="close-circle" size={18} color={Colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       {/* List */}
       {items.length === 0 ? (
         <View style={styles.emptyState}>
           <MaterialCommunityIcons name="food-variant" size={64} color={Colors.textMuted} />
-          <Text style={styles.emptyTitle}>No Items Yet</Text>
-          <Text style={styles.emptySubtitle}>Add your restaurant menu items to get started</Text>
+          <DualText text="No Items Found" style={styles.emptyTitle} />
+          <DualText text="Add your restaurant menu items to get started" style={styles.emptySubtitle} />
           <TouchableOpacity
             style={styles.emptyBtn}
             onPress={() => router.push({ pathname: '/item-form' })}
           >
-            <Text style={styles.emptyBtnText}>Add First Item</Text>
+            <DualText text="Add Items" style={styles.emptyBtnText} />
           </TouchableOpacity>
+        </View>
+      ) : filteredItems.length === 0 ? (
+        <View style={styles.emptyState}>
+          <MaterialCommunityIcons name="food-off" size={64} color={Colors.textMuted} />
+          <DualText text="No Items Found" style={styles.emptyTitle} />
+          <DualText text="Try a different search or category" style={styles.emptySubtitle} />
         </View>
       ) : (
         <FlatList
-          data={items}
+          data={filteredItems}
           keyExtractor={item => item.id.toString()}
           renderItem={renderItem}
           contentContainerStyle={styles.listContent}
@@ -145,13 +202,15 @@ export default function ItemsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles() {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  contentWrapper: { flex: 1, maxWidth: 800, width: '100%', alignSelf: 'center' },
+  contentWrapper: { flex: 1, width: '100%', alignSelf: 'center' },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
   },
+  headerLandscape: { paddingVertical: Spacing.sm },
   headerTitle: { ...Typography.heading2 },
   headerSub: { ...Typography.caption, marginTop: 2 },
   addButton: {
@@ -160,8 +219,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
     ...Shadows.goldGlow,
   },
-  addButtonText: { color: Colors.textInverse, fontFamily: 'Poppins-SemiBold', fontSize: 13 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  addButtonText: { color: Colors.textInverse, fontFamily: 'Poppins-SemiBold', fontSize: 13, flexShrink: 1 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flexShrink: 1 },
   scanButton: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     borderWidth: 1.5, borderColor: Colors.gold, borderRadius: Radius.lg,
@@ -213,4 +272,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, borderRadius: Radius.full,
   },
   emptyBtnText: { color: Colors.textInverse, fontFamily: 'Poppins-SemiBold', fontSize: 14 },
-});
+  searchContainer: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: Colors.card, borderRadius: Radius.lg,
+    marginHorizontal: Spacing.lg, marginBottom: Spacing.md,
+    paddingHorizontal: Spacing.md, height: 46, borderWidth: 1, borderColor: Colors.border,
+  },
+  searchInput: { flex: 1, color: Colors.textPrimary, fontFamily: 'Poppins-Regular', fontSize: 14 },
+  });
+}

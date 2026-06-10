@@ -9,6 +9,17 @@ export const getDB = (): SQLite.SQLiteDatabase => {
   return db;
 };
 
+export const closeDB = () => {
+  if (db) {
+    try {
+      db.closeSync();
+    } catch (e) {
+      console.warn('Error closing DB', e);
+    }
+    db = null;
+  }
+};
+
 export const initDatabase = async (): Promise<void> => {
   const database = getDB();
 
@@ -70,6 +81,17 @@ export const initDatabase = async (): Promise<void> => {
     'ALTER TABLE orders ADD COLUMN cash_amount REAL DEFAULT 0;',
     'ALTER TABLE orders ADD COLUMN upi_amount REAL DEFAULT 0;',
     'ALTER TABLE orders ADD COLUMN is_split_payment INTEGER DEFAULT 0;',
+    'ALTER TABLE items ADD COLUMN barcode TEXT;',
+    'ALTER TABLE items ADD COLUMN item_name_ar TEXT;',
+    'ALTER TABLE categories ADD COLUMN name_ar TEXT;',
+    'ALTER TABLE items ADD COLUMN item_name_ml TEXT;',
+    'ALTER TABLE categories ADD COLUMN name_ml TEXT;',
+    'ALTER TABLE items ADD COLUMN item_name_ta TEXT;',
+    'ALTER TABLE categories ADD COLUMN name_ta TEXT;',
+    'ALTER TABLE items ADD COLUMN item_name_hi TEXT;',
+    'ALTER TABLE categories ADD COLUMN name_hi TEXT;',
+    'ALTER TABLE items ADD COLUMN item_name_kn TEXT;',
+    'ALTER TABLE categories ADD COLUMN name_kn TEXT;',
   ];
 
   migrations.forEach(sql => {
@@ -112,6 +134,14 @@ export const initDatabase = async (): Promise<void> => {
     ('tax_rate', '5'),
     ('currency_symbol', '₹'),
     ('decimal_places', '2'),
-    ('receipt_footer', 'Thank you for dining with us!');
+    ('receipt_footer', 'Thank you for dining with us!'),
+    ('require_barcode', '0'),
+    ('enable_arabic', '0'),
+    ('enable_malayalam', '0'),
+    ('enable_tamil', '0'),
+    ('enable_hindi', '0'),
+    ('enable_kannada', '0'),
+    ('theme_primary', '#D4A853'),
+    ('theme_secondary', 'default');
   `);
 };

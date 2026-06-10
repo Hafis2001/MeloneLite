@@ -92,55 +92,62 @@ class PrinterService {
 
   setPaperWidth(mm: number) {
     this.paperWidth = mm;
-    this.charsPerLine = mm >= 80 ? 48 : 32;
+    if (mm >= 80) {
+      this.charsPerLine = 48; // 80mm = 48 chars
+    } else if (mm >= 58) {
+      this.charsPerLine = 32; // 58mm = 32 chars
+    } else {
+      this.charsPerLine = 26; // 48mm (2 inch compact) = 26 chars (avoids right-edge cutoff)
+    }
     AsyncStorage.setItem('printer_paper_width', mm.toString());
   }
 
   async requestPermissions() {
     if (Platform.OS !== 'android') return true;
     
-    console.log("PrinterService: Requesting permissions with safety timeout...");
-    
-    const requestWithTimeout = async () => {
-      try {
-        const apiLevel = typeof Platform.Version === 'string' ? parseInt(Platform.Version, 10) : Platform.Version;
-        if (apiLevel >= 31) {
-          console.log("PrinterService: Checking Bluetooth Connect...");
-          await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT);
-          console.log("PrinterService: Checking Bluetooth Scan...");
-          await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN);
-          console.log("PrinterService: Checking Fine Location...");
-          await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
-        } else {
-          console.log("PrinterService: Requesting Legacy Location...");
-          await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+    console.log("PrinterService: Requesting permissions...");
+    try {
+      const apiLevel = typeof Platform.Version === 'string' ? parseInt(Platform.Version, 10) : Platform.Version;
+      if (apiLevel >= 31) {
+        console.log("PrinterService: Checking Bluetooth permissions for Android 12+ (API " + apiLevel + ")");
+        const hasConnect = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT);
+        const hasScan = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN);
+        const hasLocation = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+        
+        if (!hasConnect || !hasScan || !hasLocation) {
+          console.log("PrinterService: Requesting multiple permissions via system prompt...");
+          const results = await PermissionsAndroid.requestMultiple([
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+          ]);
+          return results[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] === PermissionsAndroid.RESULTS.GRANTED &&
+                 results[PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN] === PermissionsAndroid.RESULTS.GRANTED;
         }
         return true;
-      } catch (e) {
-        console.error("PrinterService: Permission request error", e);
-        return false;
+      } else {
+        console.log("PrinterService: Checking legacy location permission (API " + apiLevel + ")");
+        const hasLocation = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+        if (!hasLocation) {
+          const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+          return result === PermissionsAndroid.RESULTS.GRANTED;
+        }
+        return true;
       }
-    };
-
-    const timeout = new Promise<boolean>((resolve) => {
-      setTimeout(() => {
-        console.warn("PrinterService: Permission request timed out after 5s");
-        resolve(false); 
-      }, 5000);
-    });
-
-    // We race the request against a 5s timeout so the app doesn't stay stuck
-    return Promise.race([requestWithTimeout(), timeout]);
+    } catch (e) {
+      console.error("PrinterService: Permission request error", e);
+      return false;
+    }
   }
 
   async init() {
     console.log("PrinterService: Initializing...");
     if (this.isInitialized) return true;
     
-    // We try to request permissions, but we don't block forever if it hangs
+    // Request permissions on first init
     const hasPermission = await this.requestPermissions();
     if (!hasPermission) {
-      console.warn("PrinterService: Permission check was not successful or timed out. Proceeding anyway...");
+      console.warn("PrinterService: Permission check was not successful. Proceeding anyway...");
     }
     
     try {
@@ -173,6 +180,9 @@ class PrinterService {
 
   async getDevices() {
     console.log("PrinterService: Getting device list...");
+    // Always request/verify permissions before scanning/getting devices
+    await this.requestPermissions();
+    
     const initialized = await this.init();
     if (!initialized) {
       console.error("PrinterService: Cannot get devices, init failed");
@@ -233,7 +243,7 @@ class PrinterService {
       const logoUri = await AsyncStorage.getItem('printer_logo_uri');
       if (logoUri && BLEPrinter && typeof BLEPrinter.printImage === 'function') {
         console.log("PrinterService: Printing logo image:", logoUri);
-        const imageWidth = this.paperWidth >= 80 ? 250 : 150;
+        const imageWidth = this.paperWidth >= 80 ? 250 : this.paperWidth === 48 ? 120 : 150;
         await BLEPrinter.printImage(logoUri, imageWidth);
       }
     } catch (imageErr) {
@@ -241,6 +251,8 @@ class PrinterService {
     }
 
     const width = this.charsPerLine;
+    const decimals = parseInt(settings?.decimal_places || '2', 10);
+    const safeDecimals = isNaN(decimals) ? 2 : decimals;
     const center = (text: string) => {
       const pad = Math.floor((width - text.length) / 2);
       return " ".repeat(Math.max(0, pad)) + text + "\n";
@@ -251,17 +263,9 @@ class PrinterService {
     };
 
     const formatThreeColumns = (col1: string, col2: string, col3: string) => {
-      const col3Width = 8; // Amt column width
-      const col2Width = 5; // Qty column width
-      const col1Width = width - col2Width - col3Width; // Remaining for Item
-
-      // Format Item (left-aligned)
-      let itemStr = col1;
-      if (itemStr.length > col1Width) {
-        itemStr = itemStr.substring(0, col1Width - 3) + "...";
-      } else {
-        itemStr = itemStr + " ".repeat(col1Width - itemStr.length);
-      }
+      const col3Width = width >= 32 ? 8 : 7; // Amt column width
+      const col2Width = width >= 32 ? 4 : 3; // Qty column width
+      const col1Width = width - col2Width - col3Width - 2; // Remaining for Item, reserving 2 characters for space separators
 
       // Format Qty (right-aligned inside its column)
       let qtyStr = col2;
@@ -279,7 +283,42 @@ class PrinterService {
         amtStr = " ".repeat(col3Width - amtStr.length) + amtStr;
       }
 
-      return itemStr + qtyStr + amtStr + "\n";
+      // Format Item (left-aligned) - Wrap to up to 2 lines if long
+      if (col1.length <= col1Width) {
+        const itemStr = col1 + " ".repeat(col1Width - col1.length);
+        return itemStr + " " + qtyStr + " " + amtStr + "\n";
+      } else {
+        // Find best split point near limit (on a space)
+        let splitIdx = col1.lastIndexOf(' ', col1Width);
+        if (splitIdx <= 0) {
+          splitIdx = col1Width;
+        }
+
+        let line1 = col1.substring(0, splitIdx).trim();
+        let rest = col1.substring(splitIdx).trim();
+
+        if (line1.length > col1Width) {
+          line1 = line1.substring(0, col1Width);
+        } else {
+          line1 = line1 + " ".repeat(col1Width - line1.length);
+        }
+
+        const firstLine = line1 + " " + qtyStr + " " + amtStr + "\n";
+        
+        if (rest.length === 0) {
+          return firstLine;
+        }
+
+        let line2 = "";
+        if (rest.length > col1Width) {
+          line2 = rest.substring(0, col1Width - 3) + "...";
+        } else {
+          line2 = rest + " ".repeat(col1Width - rest.length);
+        }
+
+        const secondLine = line2 + " ".repeat(col2Width + col3Width + 2) + "\n";
+        return firstLine + secondLine;
+      }
     };
 
     let receipt = "";
@@ -305,7 +344,7 @@ class PrinterService {
       try {
         const qty = Number(item.quantity || 0);
         const subtotal = Number(item.subtotal || 0);
-        const amtStr = subtotal.toFixed(2);
+        const amtStr = subtotal.toFixed(safeDecimals);
         const qtyStr = qty.toString();
         const name = item.item_name || 'Item';
         
@@ -316,17 +355,12 @@ class PrinterService {
     });
 
     receipt += "-".repeat(width) + "\n";
-    receipt += leftRight("Subtotal", Number(order.subtotal || 0).toFixed(2));
-    if (order.discount > 0) receipt += leftRight("Discount", `-${Number(order.discount || 0).toFixed(2)}`);
+    receipt += leftRight("Subtotal", Number(order.subtotal || 0).toFixed(safeDecimals));
+    if (order.discount > 0) receipt += leftRight("Discount", `-${Number(order.discount || 0).toFixed(safeDecimals)}`);
     receipt += "\x1B\x45\x01"; // Bold On
-    receipt += leftRight("TOTAL", Number(order.grand_total || 0).toFixed(2));
+    receipt += leftRight("TOTAL", Number(order.grand_total || 0).toFixed(safeDecimals));
     receipt += "\x1B\x45\x00"; // Bold Off
     
-    if (order.is_split_payment) {
-      receipt += leftRight("- Cash", Number(order.cash_amount || 0).toFixed(2));
-      receipt += leftRight("- UPI", Number(order.upi_amount || 0).toFixed(2));
-    }
-
     receipt += "-".repeat(width) + "\n";
     
     receipt += center(settings.receipt_footer || "Thank you!");

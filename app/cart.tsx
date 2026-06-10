@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, KeyboardAvoidingView, Platform,
+  TextInput, Alert, KeyboardAvoidingView, Platform, useWindowDimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -13,8 +13,11 @@ import { printReceipt } from '../src/utils/printUtils';
 import printerService from '../src/services/printerService';
 import { formatCurrency } from '../src/utils/currencyUtils';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../src/constants/theme';
+import { DualText } from '../src/components/DualText';
+import { useActiveLanguage } from '../src/context/ThemeContext';
+import { t } from '../src/utils/translations';
 
-const PAYMENT_METHODS = ['Cash', 'Card', 'UPI', 'Wallet'];
+const PAYMENT_METHODS = ['Cash', 'Card', 'UPI'];
 
 export default function CartScreen() {
   const {
@@ -24,9 +27,12 @@ export default function CartScreen() {
     getSubtotal,
   } = useCart();
 
-  const { getTotalItems } = useCart();
   const [placing, setPlacing] = useState(false);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const lang = useActiveLanguage();
+
+  const { width, height } = useWindowDimensions();
+  const isLandscapePhone = width > height && width < 1024;
 
   const subtotal = getSubtotal();
   const discountAmt = Math.max(0, Math.min(state.discount, subtotal));
@@ -47,7 +53,7 @@ export default function CartScreen() {
             text: "Standard Print", 
             onPress: async () => {
               try {
-                await printReceipt(full, full.items, settings);
+                await printReceipt(full, full.items || [], settings);
               } catch (e: any) {
                 Alert.alert('Print Error', e.message);
               }
@@ -60,7 +66,7 @@ export default function CartScreen() {
     }
 
     try {
-      const success = await printReceipt(full, full.items, settings);
+      const success = await printReceipt(full, full.items || [], settings);
       if (success) {
         incrementPrintCount(orderId);
       }
@@ -131,15 +137,15 @@ export default function CartScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={isLandscapePhone ? ['left', 'right'] : ['top', 'bottom']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <View style={styles.contentWrapper}>
+        <View style={[styles.contentWrapper, isLandscapePhone && { paddingHorizontal: Spacing.xl }]}>
           {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, isLandscapePhone && styles.headerLandscape]}>
           <TouchableOpacity style={styles.backBtn} onPress={() => router.dismiss()}>
             <MaterialCommunityIcons name="chevron-down" size={26} color={Colors.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Your Order</Text>
+          <DualText text="Your Order" style={styles.headerTitle} />
           {state.items.length > 0 && (
             <TouchableOpacity onPress={() => Alert.alert('Clear Cart', 'Remove all items?', [
               { text: 'Cancel', style: 'cancel' },
@@ -156,8 +162,8 @@ export default function CartScreen() {
           {state.items.length === 0 ? (
             <View style={styles.emptyState}>
               <MaterialCommunityIcons name="cart-off" size={64} color={Colors.textMuted} />
-              <Text style={styles.emptyTitle}>Cart is Empty</Text>
-              <Text style={styles.emptySubtitle}>Add items from the Menu tab</Text>
+              <DualText text="Cart is Empty" style={styles.emptyTitle} />
+              <DualText text="Add items from the Menu tab" style={styles.emptySubtitle} />
             </View>
           ) : (
             <>
@@ -166,8 +172,8 @@ export default function CartScreen() {
                 {state.items.map(ci => (
                   <View key={ci.item.id} style={styles.cartItem}>
                     <View style={styles.cartItemInfo}>
-                      <Text style={styles.cartItemName} numberOfLines={1}>{ci.item.item_name}</Text>
-                      <Text style={styles.cartItemRate}>{formatCurrency(ci.item.rate)} each</Text>
+                      <DualText text={ci.item.item_name} arabicText={ci.item.item_name_ar} malayalamText={ci.item.item_name_ml} tamilText={ci.item.item_name_ta} hindiText={ci.item.item_name_hi} kannadaText={ci.item.item_name_kn} style={styles.cartItemName} numberOfLines={1} />
+                      <Text style={styles.cartItemRate}>{formatCurrency(ci.item.rate)} {t('each', lang)}</Text>
                     </View>
                     <View style={styles.qtyControls}>
                       <TouchableOpacity style={styles.qtyBtn}
@@ -197,7 +203,7 @@ export default function CartScreen() {
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <MaterialCommunityIcons name="clipboard-text-outline" size={20} color={Colors.gold} />
-                    <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Order Details</Text>
+                    <DualText text="Order Details" style={[styles.sectionTitle, { marginBottom: 0 }]} />
                   </View>
                   <MaterialCommunityIcons 
                     name={detailsExpanded ? 'chevron-up' : 'chevron-down'} 
@@ -209,19 +215,19 @@ export default function CartScreen() {
                   <View style={{ marginTop: Spacing.md }}>
                     <View style={styles.inputGroup}>
                       <MaterialCommunityIcons name="account-outline" size={18} color={Colors.gold} />
-                      <TextInput style={styles.input} placeholder="Customer Name (optional)"
+                      <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Customer Name (optional) / اسم العميل (اختياري)' : getSetting('enable_malayalam') === '1' ? 'Customer Name (optional) / ഉപഭോക്താവിന്റെ പേര് (നിർബന്ധമില്ല)' : getSetting('enable_tamil') === '1' ? 'Customer Name (optional) / வாடிக்கையாளர் பெயர் (விருப்பத்திற்குரியது)' : 'Customer Name (optional)'}
                         placeholderTextColor={Colors.textMuted} value={state.customerName}
                         onChangeText={setCustomerName} />
                     </View>
                     <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
                       <MaterialCommunityIcons name="table-chair" size={18} color={Colors.gold} />
-                      <TextInput style={styles.input} placeholder="Table No. (optional)"
+                      <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Table No. (optional) / رقم الطاولة (اختياري)' : getSetting('enable_malayalam') === '1' ? 'Table No. (optional) / ടേബിൾ നമ്പർ (നിർബന്ധമില്ല)' : getSetting('enable_tamil') === '1' ? 'Table No. (optional) / மேஜை எண் (விருப்பத்திற்குரியது)' : 'Table No. (optional)'}
                         placeholderTextColor={Colors.textMuted} value={state.tableNo}
                         onChangeText={setTableNo} keyboardType="numeric" />
                     </View>
                     <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
                       <MaterialCommunityIcons name="tag-outline" size={18} color={Colors.gold} />
-                      <TextInput style={styles.input} placeholder="Discount amount"
+                      <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Discount amount / قيمة الخصم' : getSetting('enable_malayalam') === '1' ? 'Discount amount / കിഴിവ്' : getSetting('enable_tamil') === '1' ? 'Discount amount / தள்ளுபடி தொகை' : 'Discount amount'}
                         placeholderTextColor={Colors.textMuted}
                         value={state.discount > 0 ? state.discount.toString() : ''}
                         onChangeText={v => setDiscount(parseFloat(v) || 0)}
@@ -229,7 +235,7 @@ export default function CartScreen() {
                     </View>
                     <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
                       <MaterialCommunityIcons name="note-text-outline" size={18} color={Colors.gold} />
-                      <TextInput style={styles.input} placeholder="Notes (optional)"
+                      <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Notes (optional) / ملاحظات (اختياري)' : getSetting('enable_malayalam') === '1' ? 'Notes (optional) / കുറിപ്പുകൾ (നിർബന്ധമില്ല)' : getSetting('enable_tamil') === '1' ? 'Notes (optional) / குறிப்புகள் (விருப்பத்திற்குரியது)' : 'Notes (optional)'}
                         placeholderTextColor={Colors.textMuted} value={state.notes}
                         onChangeText={setNotes} />
                     </View>
@@ -250,7 +256,7 @@ export default function CartScreen() {
               {/* Payment Method */}
               <View style={styles.section}>
                 <View style={styles.paymentHeader}>
-                  <Text style={styles.sectionTitle}>Payment Method</Text>
+                  <DualText text="Payment Method" style={styles.sectionTitle} />
                   <TouchableOpacity 
                     style={[styles.splitToggle, state.isSplitPayment && styles.splitToggleActive]}
                     onPress={() => setSplitPayment(!state.isSplitPayment)}
@@ -259,16 +265,14 @@ export default function CartScreen() {
                       name={state.isSplitPayment ? "call-split" : "square-outline"} 
                       size={18} color={state.isSplitPayment ? Colors.textInverse : Colors.gold} 
                     />
-                    <Text style={[styles.splitToggleText, state.isSplitPayment && { color: Colors.textInverse }]}>
-                      Split
-                    </Text>
+                    <DualText text="Split" style={[styles.splitToggleText, state.isSplitPayment && { color: Colors.textInverse }]} />
                   </TouchableOpacity>
                 </View>
 
                 {state.isSplitPayment ? (
                   <View style={styles.splitInputContainer}>
                     <View style={styles.splitInputBox}>
-                      <Text style={styles.splitLabel}>Cash Amount</Text>
+                      <DualText text="Cash Amount" style={styles.splitLabel} />
                       <View style={styles.inputGroup}>
                         <MaterialCommunityIcons name="cash" size={18} color={Colors.gold} />
                         <TextInput 
@@ -285,7 +289,7 @@ export default function CartScreen() {
                       </View>
                     </View>
                     <View style={styles.splitInputBox}>
-                      <Text style={styles.splitLabel}>UPI Amount</Text>
+                      <DualText text="UPI Amount" style={styles.splitLabel} />
                       <View style={styles.inputGroup}>
                         <MaterialCommunityIcons name="cellphone-nfc" size={18} color={Colors.gold} />
                         <TextInput 
@@ -308,9 +312,7 @@ export default function CartScreen() {
                       <TouchableOpacity key={method}
                         style={[styles.paymentChip, state.paymentMethod === method && styles.paymentChipActive]}
                         onPress={() => setPaymentMethod(method)}>
-                        <Text style={[styles.paymentChipText, state.paymentMethod === method && styles.paymentChipTextActive]}>
-                          {method}
-                        </Text>
+                        <DualText text={method} style={[styles.paymentChipText, state.paymentMethod === method && styles.paymentChipTextActive]} />
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -318,20 +320,20 @@ export default function CartScreen() {
               </View>
 
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Bill Summary</Text>
+                <DualText text="Bill Summary" style={styles.sectionTitle} />
                 <View style={styles.billRow}>
-                  <Text style={styles.billLabel}>Subtotal</Text>
+                  <DualText text="Subtotal" style={styles.billLabel} />
                   <Text style={styles.billValue}>{formatCurrency(subtotal)}</Text>
                 </View>
                 {discountAmt > 0 && (
                   <View style={styles.billRow}>
-                    <Text style={styles.billLabel}>Discount</Text>
+                    <DualText text="Discount" style={styles.billLabel} />
                     <Text style={[styles.billValue, { color: Colors.error }]}>- {formatCurrency(discountAmt)}</Text>
                   </View>
                 )}
 
                 <View style={[styles.billRow, styles.grandRow]}>
-                  <Text style={styles.grandLabel}>Grand Total</Text>
+                  <DualText text="Grand Total" style={styles.grandLabel} />
                   <Text style={styles.grandValue}>{formatCurrency(grandTotal)}</Text>
                 </View>
               </View>
@@ -350,9 +352,14 @@ export default function CartScreen() {
               activeOpacity={0.88}
             >
               <MaterialCommunityIcons name="check-circle-outline" size={22} color={Colors.textInverse} />
-              <Text style={styles.placeOrderText}>
-                {placing ? 'Placing Order...' : `Place Order  •  ${formatCurrency(grandTotal)}`}
-              </Text>
+              {placing ? (
+                <Text style={styles.placeOrderText}>{t('Placing Order...', lang)}</Text>
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <DualText text="Place Order" style={styles.placeOrderText} />
+                  <Text style={styles.placeOrderText}>  •  {formatCurrency(grandTotal)}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           </View>
         )}
@@ -364,12 +371,13 @@ export default function CartScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  contentWrapper: { flex: 1, maxWidth: 800, width: '100%', alignSelf: 'center' },
+  contentWrapper: { flex: 1, width: '100%', alignSelf: 'center' },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
+  headerLandscape: { paddingVertical: Spacing.sm },
   backBtn: { padding: 4 },
   headerTitle: { ...Typography.heading3 },
   scrollContent: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg, paddingBottom: 20 },

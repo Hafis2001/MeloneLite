@@ -1,4 +1,4 @@
-import { Order, OrderItem } from '../db/ordersDB';
+import { Order, OrderItem, AdvancedStats } from '../db/ordersDB';
 import { Settings } from '../db/settingsDB';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -122,12 +122,6 @@ export const generateReceiptHTML = (
               <span>Total Amount</span>
               <span>${formatCurrency(order.grand_total, sym, dec)}</span>
             </div>
-            ${order.is_split_payment ? `
-              <div style="margin-top:10px; border-top:1px solid #eee; padding-top:10px;">
-                <p><span>Paid by Cash:</span><span>${formatCurrency(order.cash_amount, sym, dec)}</span></p>
-                <p><span>Paid by UPI:</span><span>${formatCurrency(order.upi_amount, sym, dec)}</span></p>
-              </div>
-            ` : ''}
           </div>
         </div>
 
@@ -220,10 +214,6 @@ export const generateReceiptHTML = (
             <span>TOTAL</span>
             <span>${formatCurrency(order.grand_total, sym, dec)}</span>
           </div>
-          ${order.is_split_payment ? `
-            <p><span>- Cash:</span><span>${formatCurrency(order.cash_amount, sym, dec)}</span></p>
-            <p><span>- UPI:</span><span>${formatCurrency(order.upi_amount, sym, dec)}</span></p>
-          ` : ''}
         </div>
 
         <div class="footer">
@@ -269,6 +259,150 @@ export const sharePDF = async (
       await Sharing.shareAsync(uri, {
         mimeType: 'application/pdf',
         dialogTitle: `Share Bill - ${order.order_number}`,
+        UTI: 'com.adobe.pdf',
+      });
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('PDF Share Error:', error);
+    return false;
+  }
+};
+
+export const generateReportHTML = (
+  stats: AdvancedStats,
+  topItems: { item_name: string; total_quantity: number; total_revenue: number }[],
+  settings: Settings,
+  reportTitle: string
+): string => {
+  const sym = settings.currency_symbol || '₹';
+  const dec = settings.decimal_places || '2';
+
+  const itemRows = topItems.map((item, index) => `
+    <tr>
+      <td style="padding:10px; border-bottom:1px solid #eee;">${index + 1}</td>
+      <td style="padding:10px; border-bottom:1px solid #eee;">${item.item_name}</td>
+      <td style="padding:10px; text-align:center; border-bottom:1px solid #eee;">${item.total_quantity}</td>
+      <td style="padding:10px; text-align:right; border-bottom:1px solid #eee; font-weight:bold;">${formatCurrency(item.total_revenue, sym, dec)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+          margin: 0 auto;
+          padding: 40px;
+          background: #fff;
+          color: #333;
+          max-width: 800px;
+        }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
+        .restaurant-info { flex: 1; }
+        .restaurant-name { font-size: 28px; font-weight: bold; color: #000; margin-bottom: 5px; }
+        .restaurant-sub { font-size: 14px; color: #666; margin-top: 3px; }
+        .invoice-title { font-size: 28px; font-weight: bold; color: #333; text-transform: uppercase; text-align: right; }
+        
+        .metrics { display: flex; justify-content: space-between; margin-bottom: 30px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
+        .metric-block { text-align: center; flex: 1; border-right: 1px solid #ddd; }
+        .metric-block:last-child { border-right: none; }
+        .metric-title { font-size: 12px; text-transform: uppercase; color: #666; margin-bottom: 5px; }
+        .metric-value { font-size: 24px; font-weight: bold; color: #333; }
+        .metric-value.highlight { color: #d4a853; }
+
+        .section-title { font-size: 18px; font-weight: bold; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+
+        table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+        th { font-size: 14px; text-align: left; padding: 12px 10px; background: #333; color: #fff; text-transform: uppercase; }
+        th:nth-child(3) { text-align: center; }
+        th:nth-child(4) { text-align: right; }
+        
+        .footer { text-align: center; margin-top: 50px; font-size: 12px; color: #888; border-top: 1px solid #eee; padding-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="restaurant-info">
+          <div class="restaurant-name">${settings.restaurant_name || 'Restaurant'}</div>
+          ${settings.restaurant_address ? `<div class="restaurant-sub">${settings.restaurant_address}</div>` : ''}
+          ${settings.restaurant_phone ? `<div class="restaurant-sub">Phone: ${settings.restaurant_phone}</div>` : ''}
+        </div>
+        <div class="invoice-title">${reportTitle}</div>
+      </div>
+
+      <div class="section-title">Key Metrics</div>
+      <div class="metrics">
+        <div class="metric-block">
+          <div class="metric-title">Total Bills</div>
+          <div class="metric-value">${stats.totalBills}</div>
+        </div>
+        <div class="metric-block">
+          <div class="metric-title">Total Revenue</div>
+          <div class="metric-value highlight">${formatCurrency(stats.totalRevenue, sym, dec)}</div>
+        </div>
+      </div>
+
+      <div class="section-title">Payment Breakdown</div>
+      <div class="metrics">
+        <div class="metric-block">
+          <div class="metric-title">Cash</div>
+          <div class="metric-value" style="color: #10B981;">${formatCurrency(stats.cashRevenue, sym, dec)}</div>
+        </div>
+        <div class="metric-block">
+          <div class="metric-title">UPI</div>
+          <div class="metric-value" style="color: #3B82F6;">${formatCurrency(stats.upiRevenue, sym, dec)}</div>
+        </div>
+        <div class="metric-block">
+          <div class="metric-title">Card</div>
+          <div class="metric-value" style="color: #F59E0B;">${formatCurrency(stats.cardRevenue, sym, dec)}</div>
+        </div>
+      </div>
+
+      <div class="section-title">Top Moved Items</div>
+      ${topItems.length > 0 ? `
+      <table>
+        <thead>
+          <tr>
+            <th width="10%">#</th>
+            <th width="50%">Item Name</th>
+            <th width="20%">Total Sold</th>
+            <th width="20%">Revenue</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemRows}
+        </tbody>
+      </table>
+      ` : '<p style="color:#666;">No items sold in this period.</p>'}
+
+      <div class="footer">
+        <p>Generated on ${new Date().toLocaleString()}</p>
+        <p style="margin-top:8px;">Powered by MeloneLite</p>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
+export const shareReportPDF = async (
+  stats: AdvancedStats,
+  topItems: { item_name: string; total_quantity: number; total_revenue: number }[],
+  settings: Settings,
+  reportTitle: string
+): Promise<boolean> => {
+  try {
+    const html = generateReportHTML(stats, topItems, settings, reportTitle);
+    const { uri } = await Print.printToFileAsync({ html, base64: false });
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: `Share ${reportTitle}`,
         UTI: 'com.adobe.pdf',
       });
       return true;

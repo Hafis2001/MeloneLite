@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { addCategory, updateCategory, Category } from '../db/categoriesDB';
+import { getSetting } from '../db/settingsDB';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../constants/theme';
 
 interface Props {
@@ -17,24 +18,79 @@ interface Props {
 
 export default function AddCategoryModal({ visible, editCategory, availableColors, onClose, onSaved }: Props) {
   const [name, setName] = useState('');
+  const [nameAr, setNameAr] = useState('');
+  const [nameMl, setNameMl] = useState('');
+  const [nameTa, setNameTa] = useState('');
+  const [nameHi, setNameHi] = useState('');
   const [selectedColor, setSelectedColor] = useState(availableColors[0]);
   const [error, setError] = useState('');
+
+  const enableArabic = getSetting('enable_arabic') === '1';
+  const enableMalayalam = getSetting('enable_malayalam') === '1';
+  const enableTamil = getSetting('enable_tamil') === '1';
+  const enableHindi = getSetting('enable_hindi') === '1';
 
   useEffect(() => {
     if (visible) {
       setName(editCategory?.name ?? '');
+      setNameAr(editCategory?.name_ar ?? '');
+      setNameMl(editCategory?.name_ml ?? '');
+      setNameTa(editCategory?.name_ta ?? '');
+      setNameHi(editCategory?.name_hi ?? '');
       setSelectedColor(editCategory?.color ?? availableColors[0]);
       setError('');
     }
   }, [visible, editCategory]);
 
+  useEffect(() => {
+    if (!name.trim()) {
+      setNameAr('');
+      setNameMl('');
+      setNameTa('');
+      setNameHi('');
+      return;
+    }
+
+    const timerId = setTimeout(async () => {
+      try {
+        const resAr = await fetch(`https://inputtools.google.com/request?text=${encodeURIComponent(name)}&itc=ar-t-i0-und&num=1`);
+        const dataAr = await resAr.json();
+        if (dataAr[0] === 'SUCCESS' && Array.isArray(dataAr[1])) {
+          setNameAr(dataAr[1].map((chunk: any) => chunk[1][0]).join(''));
+        }
+
+        const resMl = await fetch(`https://inputtools.google.com/request?text=${encodeURIComponent(name)}&itc=ml-t-i0-und&num=1`);
+        const dataMl = await resMl.json();
+        if (dataMl[0] === 'SUCCESS' && Array.isArray(dataMl[1])) {
+          setNameMl(dataMl[1].map((chunk: any) => chunk[1][0]).join(''));
+        }
+
+        const resTa = await fetch(`https://inputtools.google.com/request?text=${encodeURIComponent(name)}&itc=ta-t-i0-und&num=1`);
+        const dataTa = await resTa.json();
+        if (dataTa[0] === 'SUCCESS' && Array.isArray(dataTa[1])) {
+          setNameTa(dataTa[1].map((chunk: any) => chunk[1][0]).join(''));
+        }
+
+        const resHi = await fetch(`https://inputtools.google.com/request?text=${encodeURIComponent(name)}&itc=hi-t-i0-und&num=1`);
+        const dataHi = await resHi.json();
+        if (dataHi[0] === 'SUCCESS' && Array.isArray(dataHi[1])) {
+          setNameHi(dataHi[1].map((chunk: any) => chunk[1][0]).join(''));
+        }
+      } catch (err) {
+        console.log('Category transliteration failed:', err);
+      }
+    }, 800);
+
+    return () => clearTimeout(timerId);
+  }, [name]);
+
   const handleSave = () => {
     if (!name.trim()) { setError('Category name is required'); return; }
     try {
       if (editCategory) {
-        updateCategory(editCategory.id, name, selectedColor);
+        updateCategory(editCategory.id, name, nameAr || null, nameMl || null, nameTa || null, nameHi || null, selectedColor);
       } else {
-        addCategory(name, selectedColor);
+        addCategory(name, nameAr || null, nameMl || null, nameTa || null, nameHi || null, selectedColor);
       }
       onSaved();
     } catch (e: any) {
@@ -57,7 +113,6 @@ export default function AddCategoryModal({ visible, editCategory, availableColor
                   </TouchableOpacity>
                 </View>
 
-                {/* Name Input */}
                 <Text style={styles.label}>Category Name *</Text>
                 <View style={[styles.inputRow, error ? { borderColor: Colors.error } : {}]}>
                   <MaterialCommunityIcons name="tag-outline" size={18} color={Colors.gold} style={{ marginRight: 8 }} />
@@ -70,6 +125,75 @@ export default function AddCategoryModal({ visible, editCategory, availableColor
                     autoFocus
                   />
                 </View>
+
+                {/* Name Ar Input */}
+                {enableArabic && (
+                  <>
+                    <Text style={[styles.label, { marginTop: Spacing.sm }]}>Category Name (Arabic)</Text>
+                    <View style={[styles.inputRow, error ? { borderColor: Colors.error } : {}]}>
+                      <MaterialCommunityIcons name="translate" size={18} color={Colors.gold} style={{ marginRight: 8 }} />
+                      <TextInput
+                        style={[styles.input, { textAlign: 'right' }]}
+                        value={nameAr}
+                        onChangeText={t => { setNameAr(t); setError(''); }}
+                        placeholder="مقبلات، مشروبات..."
+                        placeholderTextColor={Colors.textMuted}
+                      />
+                    </View>
+                  </>
+                )}
+
+                {/* Name Ml Input */}
+                {enableMalayalam && (
+                  <>
+                    <Text style={[styles.label, { marginTop: Spacing.sm }]}>Category Name (Malayalam)</Text>
+                    <View style={[styles.inputRow, error ? { borderColor: Colors.error } : {}]}>
+                      <MaterialCommunityIcons name="translate" size={18} color={Colors.gold} style={{ marginRight: 8 }} />
+                      <TextInput
+                        style={[styles.input, { textAlign: 'left' }]}
+                        value={nameMl}
+                        onChangeText={t => { setNameMl(t); setError(''); }}
+                        placeholder="സ്റ്റാർട്ടറുകൾ..."
+                        placeholderTextColor={Colors.textMuted}
+                      />
+                    </View>
+                  </>
+                )}
+
+                {/* Name Ta Input */}
+                {enableTamil && (
+                  <>
+                    <Text style={[styles.label, { marginTop: Spacing.sm }]}>Category Name (Tamil)</Text>
+                    <View style={[styles.inputRow, error ? { borderColor: Colors.error } : {}]}>
+                      <MaterialCommunityIcons name="translate" size={18} color={Colors.gold} style={{ marginRight: 8 }} />
+                      <TextInput
+                        style={[styles.input, { textAlign: 'left' }]}
+                        value={nameTa}
+                        onChangeText={t => { setNameTa(t); setError(''); }}
+                        placeholder="தொடக்க உணவுகள்..."
+                        placeholderTextColor={Colors.textMuted}
+                      />
+                    </View>
+                  </>
+                )}
+
+                {/* Name Hi Input */}
+                {enableHindi && (
+                  <>
+                    <Text style={[styles.label, { marginTop: Spacing.sm }]}>Category Name (Hindi)</Text>
+                    <View style={[styles.inputRow, error ? { borderColor: Colors.error } : {}]}>
+                      <MaterialCommunityIcons name="translate" size={18} color={Colors.gold} style={{ marginRight: 8 }} />
+                      <TextInput
+                        style={[styles.input, { textAlign: 'left' }]}
+                        value={nameHi}
+                        onChangeText={t => { setNameHi(t); setError(''); }}
+                        placeholder="शुरुआती..."
+                        placeholderTextColor={Colors.textMuted}
+                      />
+                    </View>
+                  </>
+                )}
+
                 {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
                 {/* Color Picker */}
