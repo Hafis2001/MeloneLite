@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, KeyboardAvoidingView, Platform, useWindowDimensions,
+  Modal, TouchableWithoutFeedback,
 } from 'react-native';
 import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -28,7 +29,8 @@ export default function CartScreen() {
   } = useCart();
 
   const [placing, setPlacing] = useState(false);
-  const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const [customerModalVisible, setCustomerModalVisible] = useState(false);
+  const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const lang = useActiveLanguage();
 
   const { width, height } = useWindowDimensions();
@@ -85,10 +87,10 @@ export default function CartScreen() {
       const orderItems = state.items.map(ci => ({
         item_id: ci.item.id,
         item_code: ci.item.item_code,
-        item_name: ci.item.item_name,
-        rate: ci.item.rate,
+        item_name: ci.selectedVariant ? `${ci.item.item_name} — ${ci.selectedVariant.name}` : ci.item.item_name,
+        rate: ci.selectedVariant ? ci.selectedVariant.price : ci.item.rate,
         quantity: ci.quantity,
-        subtotal: parseFloat((ci.item.rate * ci.quantity).toFixed(2)),
+        subtotal: parseFloat(((ci.selectedVariant ? ci.selectedVariant.price : ci.item.rate) * ci.quantity).toFixed(2)),
       }));
       const orderId = placeOrder(
         {
@@ -146,14 +148,19 @@ export default function CartScreen() {
             <MaterialCommunityIcons name="chevron-down" size={26} color={Colors.textPrimary} />
           </TouchableOpacity>
           <DualText text="Your Order" style={styles.headerTitle} />
-          {state.items.length > 0 && (
-            <TouchableOpacity onPress={() => Alert.alert('Clear Cart', 'Remove all items?', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Clear', style: 'destructive', onPress: clearCart },
-            ])}>
-              <MaterialCommunityIcons name="trash-can-outline" size={22} color={Colors.error} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+            <TouchableOpacity onPress={() => setCustomerModalVisible(true)} style={styles.headerIconBtn}>
+              <MaterialCommunityIcons name="clipboard-text-outline" size={24} color={Colors.gold} />
             </TouchableOpacity>
-          )}
+            {state.items.length > 0 && (
+              <TouchableOpacity onPress={() => Alert.alert('Clear Cart', 'Remove all items?', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Clear', style: 'destructive', onPress: clearCart },
+              ])} style={styles.headerIconBtn}>
+                <MaterialCommunityIcons name="trash-can-outline" size={24} color={Colors.error} />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -170,106 +177,48 @@ export default function CartScreen() {
               {/* Cart Items */}
               <View style={styles.section}>
                 {state.items.map(ci => (
-                  <View key={ci.item.id} style={styles.cartItem}>
+                  <View key={ci.cartItemId} style={styles.cartItem}>
                     <View style={styles.cartItemInfo}>
-                      <DualText text={ci.item.item_name} arabicText={ci.item.item_name_ar} malayalamText={ci.item.item_name_ml} tamilText={ci.item.item_name_ta} hindiText={ci.item.item_name_hi} kannadaText={ci.item.item_name_kn} style={styles.cartItemName} numberOfLines={1} />
-                      <Text style={styles.cartItemRate}>{formatCurrency(ci.item.rate)} {t('each', lang)}</Text>
+                      <Text style={styles.cartItemName}>{ci.item.item_name}</Text>
+                      {ci.selectedVariant && (
+                        <Text style={{ ...Typography.caption, color: Colors.gold, marginTop: 1 }}>Variant: {ci.selectedVariant.name}</Text>
+                      )}
+                      <Text style={styles.cartItemRate}>{formatCurrency(ci.selectedVariant ? ci.selectedVariant.price : ci.item.rate)} {t('each', lang)}</Text>
                     </View>
                     <View style={styles.qtyControls}>
                       <TouchableOpacity style={styles.qtyBtn}
-                        onPress={() => updateQuantity(ci.item.id, ci.quantity - 1)}>
+                        onPress={() => updateQuantity(ci.cartItemId, ci.quantity - 1)}>
                         <MaterialCommunityIcons name="minus" size={14} color={Colors.gold} />
                       </TouchableOpacity>
                       <Text style={styles.qtyText}>{ci.quantity}</Text>
                       <TouchableOpacity style={styles.qtyBtn}
-                        onPress={() => updateQuantity(ci.item.id, ci.quantity + 1)}>
+                        onPress={() => updateQuantity(ci.cartItemId, ci.quantity + 1)}>
                         <MaterialCommunityIcons name="plus" size={14} color={Colors.gold} />
                       </TouchableOpacity>
                     </View>
-                    <Text style={styles.cartItemSubtotal}>{formatCurrency(ci.item.rate * ci.quantity)}</Text>
-                    <TouchableOpacity onPress={() => removeItem(ci.item.id)} style={styles.removeBtn}>
+                    <Text style={styles.cartItemSubtotal}>{formatCurrency((ci.selectedVariant ? ci.selectedVariant.price : ci.item.rate) * ci.quantity)}</Text>
+                    <TouchableOpacity onPress={() => removeItem(ci.cartItemId)} style={styles.removeBtn}>
                       <MaterialCommunityIcons name="close" size={16} color={Colors.textMuted} />
                     </TouchableOpacity>
                   </View>
                 ))}
               </View>
 
-              {/* Customer Details */}
-              <View style={styles.section}>
+              {/* Payment Method Inline Dropdown Trigger */}
+              <View style={[styles.section, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: Spacing.md }]}>
+                <DualText text="Payment Method" style={[styles.sectionTitle, { marginBottom: 0 }]} />
                 <TouchableOpacity 
-                  style={styles.collapsibleHeader} 
-                  onPress={() => setDetailsExpanded(!detailsExpanded)}
-                  activeOpacity={0.7}
+                  style={styles.paymentDropdownBtn}
+                  onPress={() => setPaymentModalVisible(true)}
+                  activeOpacity={0.8}
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <MaterialCommunityIcons name="clipboard-text-outline" size={20} color={Colors.gold} />
-                    <DualText text="Order Details" style={[styles.sectionTitle, { marginBottom: 0 }]} />
-                  </View>
-                  <MaterialCommunityIcons 
-                    name={detailsExpanded ? 'chevron-up' : 'chevron-down'} 
-                    size={24} color={Colors.textMuted} 
-                  />
+                  <Text style={styles.paymentDropdownText}>{state.isSplitPayment ? 'Split' : state.paymentMethod}</Text>
+                  <MaterialCommunityIcons name="chevron-down" size={18} color={Colors.textInverse} />
                 </TouchableOpacity>
-
-                {detailsExpanded ? (
-                  <View style={{ marginTop: Spacing.md }}>
-                    <View style={styles.inputGroup}>
-                      <MaterialCommunityIcons name="account-outline" size={18} color={Colors.gold} />
-                      <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Customer Name (optional) / اسم العميل (اختياري)' : getSetting('enable_malayalam') === '1' ? 'Customer Name (optional) / ഉപഭോക്താവിന്റെ പേര് (നിർബന്ധമില്ല)' : getSetting('enable_tamil') === '1' ? 'Customer Name (optional) / வாடிக்கையாளர் பெயர் (விருப்பத்திற்குரியது)' : 'Customer Name (optional)'}
-                        placeholderTextColor={Colors.textMuted} value={state.customerName}
-                        onChangeText={setCustomerName} />
-                    </View>
-                    <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
-                      <MaterialCommunityIcons name="table-chair" size={18} color={Colors.gold} />
-                      <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Table No. (optional) / رقم الطاولة (اختياري)' : getSetting('enable_malayalam') === '1' ? 'Table No. (optional) / ടേബിൾ നമ്പർ (നിർബന്ധമില്ല)' : getSetting('enable_tamil') === '1' ? 'Table No. (optional) / மேஜை எண் (விருப்பத்திற்குரியது)' : 'Table No. (optional)'}
-                        placeholderTextColor={Colors.textMuted} value={state.tableNo}
-                        onChangeText={setTableNo} keyboardType="numeric" />
-                    </View>
-                    <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
-                      <MaterialCommunityIcons name="tag-outline" size={18} color={Colors.gold} />
-                      <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Discount amount / قيمة الخصم' : getSetting('enable_malayalam') === '1' ? 'Discount amount / കിഴിവ്' : getSetting('enable_tamil') === '1' ? 'Discount amount / தள்ளுபடி தொகை' : 'Discount amount'}
-                        placeholderTextColor={Colors.textMuted}
-                        value={state.discount > 0 ? state.discount.toString() : ''}
-                        onChangeText={v => setDiscount(parseFloat(v) || 0)}
-                        keyboardType="decimal-pad" />
-                    </View>
-                    <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
-                      <MaterialCommunityIcons name="note-text-outline" size={18} color={Colors.gold} />
-                      <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Notes (optional) / ملاحظات (اختياري)' : getSetting('enable_malayalam') === '1' ? 'Notes (optional) / കുറിപ്പുകൾ (നിർബന്ധമില്ല)' : getSetting('enable_tamil') === '1' ? 'Notes (optional) / குறிப்புகள் (விருப்பத்திற்குரியது)' : 'Notes (optional)'}
-                        placeholderTextColor={Colors.textMuted} value={state.notes}
-                        onChangeText={setNotes} />
-                    </View>
-                  </View>
-                ) : (
-                  (state.customerName || state.tableNo || state.discount > 0) && (
-                    <View style={styles.summaryRow}>
-                      <Text style={styles.summaryText}>
-                        {state.customerName && `${state.customerName} • `}
-                        {state.tableNo && `Table ${state.tableNo} • `}
-                        {state.discount > 0 && `${formatCurrency(state.discount)} Off`}
-                      </Text>
-                    </View>
-                  )
-                )}
               </View>
 
-              {/* Payment Method */}
-              <View style={styles.section}>
-                <View style={styles.paymentHeader}>
-                  <DualText text="Payment Method" style={styles.sectionTitle} />
-                  <TouchableOpacity 
-                    style={[styles.splitToggle, state.isSplitPayment && styles.splitToggleActive]}
-                    onPress={() => setSplitPayment(!state.isSplitPayment)}
-                  >
-                    <MaterialCommunityIcons 
-                      name={state.isSplitPayment ? "call-split" : "square-outline"} 
-                      size={18} color={state.isSplitPayment ? Colors.textInverse : Colors.gold} 
-                    />
-                    <DualText text="Split" style={[styles.splitToggleText, state.isSplitPayment && { color: Colors.textInverse }]} />
-                  </TouchableOpacity>
-                </View>
-
-                {state.isSplitPayment ? (
+              {state.isSplitPayment && (
+                <View style={[styles.section, { paddingVertical: Spacing.md }]}>
                   <View style={styles.splitInputContainer}>
                     <View style={styles.splitInputBox}>
                       <DualText text="Cash Amount" style={styles.splitLabel} />
@@ -306,18 +255,8 @@ export default function CartScreen() {
                       </View>
                     </View>
                   </View>
-                ) : (
-                  <View style={styles.paymentRow}>
-                    {PAYMENT_METHODS.map(method => (
-                      <TouchableOpacity key={method}
-                        style={[styles.paymentChip, state.paymentMethod === method && styles.paymentChipActive]}
-                        onPress={() => setPaymentMethod(method)}>
-                        <DualText text={method} style={[styles.paymentChipText, state.paymentMethod === method && styles.paymentChipTextActive]} />
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-              </View>
+                </View>
+              )}
 
               <View style={styles.section}>
                 <DualText text="Bill Summary" style={styles.sectionTitle} />
@@ -364,6 +303,96 @@ export default function CartScreen() {
           </View>
         )}
         </View>
+
+        {/* Modals */}
+        <Modal visible={customerModalVisible} transparent animationType="fade" onRequestClose={() => setCustomerModalVisible(false)}>
+          <TouchableWithoutFeedback onPress={() => setCustomerModalVisible(false)}>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback>
+                <View style={styles.modalCard}>
+                  <View style={styles.modalHeader}>
+                    <DualText text="Order Details" style={styles.modalTitle} />
+                    <TouchableOpacity onPress={() => setCustomerModalVisible(false)}>
+                      <MaterialCommunityIcons name="close" size={24} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
+                  
+                  <View style={styles.inputGroup}>
+                    <MaterialCommunityIcons name="account-outline" size={18} color={Colors.gold} />
+                    <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Customer Name (optional) / اسم العميل (اختياري)' : getSetting('enable_malayalam') === '1' ? 'Customer Name (optional) / ഉപഭോക്താവിന്റെ പേര് (നിർബന്ധമില്ല)' : getSetting('enable_tamil') === '1' ? 'Customer Name (optional) / வாடிக்கையாளர் பெயர் (விருப்பத்திற்குரியது)' : 'Customer Name (optional)'}
+                      placeholderTextColor={Colors.textMuted} value={state.customerName}
+                      onChangeText={setCustomerName} />
+                  </View>
+                  <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
+                    <MaterialCommunityIcons name="table-chair" size={18} color={Colors.gold} />
+                    <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Table No. (optional) / رقم الطاولة (اختياري)' : getSetting('enable_malayalam') === '1' ? 'Table No. (optional) / ടേബിൾ നമ്പർ (നിർബന്ധമില്ല)' : getSetting('enable_tamil') === '1' ? 'Table No. (optional) / மேஜை எண் (விருப்பத்திற்குரியது)' : 'Table No. (optional)'}
+                      placeholderTextColor={Colors.textMuted} value={state.tableNo}
+                      onChangeText={setTableNo} keyboardType="numeric" />
+                  </View>
+                  <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
+                    <MaterialCommunityIcons name="tag-outline" size={18} color={Colors.gold} />
+                    <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Discount amount / قيمة الخصم' : getSetting('enable_malayalam') === '1' ? 'Discount amount / കിഴിവ്' : getSetting('enable_tamil') === '1' ? 'Discount amount / தள்ளுபடி தொகை' : 'Discount amount'}
+                      placeholderTextColor={Colors.textMuted}
+                      value={state.discount > 0 ? state.discount.toString() : ''}
+                      onChangeText={v => setDiscount(parseFloat(v) || 0)}
+                      keyboardType="decimal-pad" />
+                  </View>
+                  <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
+                    <MaterialCommunityIcons name="note-text-outline" size={18} color={Colors.gold} />
+                    <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Notes (optional) / ملاحظات (اختياري)' : getSetting('enable_malayalam') === '1' ? 'Notes (optional) / കുറിപ്പുകൾ (നിർബന്ധമില്ല)' : getSetting('enable_tamil') === '1' ? 'Notes (optional) / குறிப்புகள் (விருப்பத்திற்குரியது)' : 'Notes (optional)'}
+                      placeholderTextColor={Colors.textMuted} value={state.notes}
+                      onChangeText={setNotes} />
+                  </View>
+
+                  <TouchableOpacity style={styles.modalDoneBtn} onPress={() => setCustomerModalVisible(false)}>
+                    <DualText text="Done" style={styles.modalDoneText} />
+                  </TouchableOpacity>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+
+        <Modal visible={paymentModalVisible} transparent animationType="fade" onRequestClose={() => setPaymentModalVisible(false)}>
+          <TouchableWithoutFeedback onPress={() => setPaymentModalVisible(false)}>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback>
+                <View style={styles.modalCard}>
+                  <View style={styles.modalHeader}>
+                    <DualText text="Select Payment Method" style={styles.modalTitle} />
+                    <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
+                      <MaterialCommunityIcons name="close" size={24} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
+
+                  {PAYMENT_METHODS.map(method => (
+                    <TouchableOpacity key={method}
+                      style={[styles.paymentDropdownOption, state.paymentMethod === method && !state.isSplitPayment && styles.paymentDropdownOptionActive]}
+                      onPress={() => {
+                        setPaymentMethod(method);
+                        setSplitPayment(false);
+                        setPaymentModalVisible(false);
+                      }}>
+                      <Text style={[styles.paymentDropdownOptionText, state.paymentMethod === method && !state.isSplitPayment && styles.paymentDropdownOptionTextActive]}>{method}</Text>
+                      {state.paymentMethod === method && !state.isSplitPayment && <MaterialCommunityIcons name="check" size={20} color={Colors.gold} />}
+                    </TouchableOpacity>
+                  ))}
+
+                  <TouchableOpacity
+                    style={[styles.paymentDropdownOption, state.isSplitPayment && styles.paymentDropdownOptionActive]}
+                    onPress={() => {
+                      setSplitPayment(true);
+                      setPaymentModalVisible(false);
+                    }}>
+                    <Text style={[styles.paymentDropdownOptionText, state.isSplitPayment && styles.paymentDropdownOptionTextActive]}>Split Payment</Text>
+                    {state.isSplitPayment && <MaterialCommunityIcons name="check" size={20} color={Colors.gold} />}
+                  </TouchableOpacity>
+
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -471,4 +500,24 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     color: Colors.textMuted,
   },
+  headerIconBtn: { padding: 4 },
+  paymentDropdownBtn: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.gold,
+    paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: Radius.full,
+    gap: 4,
+  },
+  paymentDropdownText: { color: Colors.textInverse, fontFamily: 'Poppins-Medium', fontSize: 13 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: Spacing.xl },
+  modalCard: { backgroundColor: Colors.background, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.light },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.lg },
+  modalTitle: { ...Typography.heading4 },
+  modalDoneBtn: { backgroundColor: Colors.gold, borderRadius: Radius.md, paddingVertical: 12, alignItems: 'center', marginTop: Spacing.lg },
+  modalDoneText: { color: Colors.textInverse, fontFamily: 'Poppins-Bold', fontSize: 15 },
+  paymentDropdownOption: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  paymentDropdownOptionActive: { borderBottomColor: Colors.gold },
+  paymentDropdownOptionText: { ...Typography.bodyMedium, color: Colors.textPrimary },
+  paymentDropdownOptionTextActive: { color: Colors.gold },
 });

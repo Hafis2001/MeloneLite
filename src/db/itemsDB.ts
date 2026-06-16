@@ -21,6 +21,7 @@ export interface Item {
   is_available: number;
   created_at: string;
   barcode?: string | null;
+  prices_json?: string | null;
 }
 
 export const getAllItems = (): Item[] => {
@@ -99,13 +100,14 @@ export const addItem = (
   rate: number,
   category_id: number | null,
   image_uri: string | null,
-  barcode?: string | null
+  barcode?: string | null,
+  prices_json?: string | null
 ): number => {
   const db = getDB();
   const result = db.runSync(
-    `INSERT INTO items (item_code, item_name, item_name_ar, item_name_ml, item_name_ta, item_name_hi, item_name_kn, rate, category_id, image_uri, barcode) 
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [item_code.trim(), item_name.trim(), item_name_ar ? item_name_ar.trim() : null, item_name_ml ? item_name_ml.trim() : null, item_name_ta ? item_name_ta.trim() : null, item_name_hi ? item_name_hi.trim() : null, item_name_kn ? item_name_kn.trim() : null, rate, category_id, image_uri, barcode ?? null]
+    `INSERT INTO items (item_code, item_name, item_name_ar, item_name_ml, item_name_ta, item_name_hi, item_name_kn, rate, category_id, image_uri, barcode, prices_json) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [item_code.trim(), item_name.trim(), item_name_ar ? item_name_ar.trim() : null, item_name_ml ? item_name_ml.trim() : null, item_name_ta ? item_name_ta.trim() : null, item_name_hi ? item_name_hi.trim() : null, item_name_kn ? item_name_kn.trim() : null, rate, category_id, image_uri, barcode ?? null, prices_json ?? null]
   );
   return result.lastInsertRowId;
 };
@@ -123,12 +125,13 @@ export const updateItem = (
   category_id: number | null,
   image_uri: string | null,
   is_available: number,
-  barcode?: string | null
+  barcode?: string | null,
+  prices_json?: string | null
 ): void => {
   const db = getDB();
   db.runSync(
-    `UPDATE items SET item_code=?, item_name=?, item_name_ar=?, item_name_ml=?, item_name_ta=?, item_name_hi=?, item_name_kn=?, rate=?, category_id=?, image_uri=?, is_available=?, barcode=? WHERE id=?`,
-    [item_code.trim(), item_name.trim(), item_name_ar ? item_name_ar.trim() : null, item_name_ml ? item_name_ml.trim() : null, item_name_ta ? item_name_ta.trim() : null, item_name_hi ? item_name_hi.trim() : null, item_name_kn ? item_name_kn.trim() : null, rate, category_id, image_uri, is_available, barcode ?? null, id]
+    `UPDATE items SET item_code=?, item_name=?, item_name_ar=?, item_name_ml=?, item_name_ta=?, item_name_hi=?, item_name_kn=?, rate=?, category_id=?, image_uri=?, is_available=?, barcode=?, prices_json=? WHERE id=?`,
+    [item_code.trim(), item_name.trim(), item_name_ar ? item_name_ar.trim() : null, item_name_ml ? item_name_ml.trim() : null, item_name_ta ? item_name_ta.trim() : null, item_name_hi ? item_name_hi.trim() : null, item_name_kn ? item_name_kn.trim() : null, rate, category_id, image_uri, is_available, barcode ?? null, prices_json ?? null, id]
   );
 };
 

@@ -243,7 +243,7 @@ export default function AboutSettingsScreen() {
 
             <View style={styles.infoCard}>
               <MaterialCommunityIcons name="information-outline" size={16} color={Colors.textMuted} />
-              <Text style={styles.infoText}>MeloneLite V 1.1.1 • </Text>
+              <Text style={styles.infoText}>MeloneLite V 2.1.1 • </Text>
             </View>
             <View style={{ height: 40 }} />
           </ScrollView>

@@ -188,6 +188,7 @@ export default function CompanySettingsScreen() {
             </View>
           </View>
 
+
           {/* Language - navigates to dedicated page */}
           <TouchableOpacity
             style={styles.navCard}

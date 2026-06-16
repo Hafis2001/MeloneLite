@@ -40,8 +40,10 @@ export default function ItemFormScreen() {
   const [categoryDropdown, setCategoryDropdown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [prices, setPrices] = useState<{name: string, price: string}[]>([]);
   const [currencySymbol, setCurrencySymbol] = useState('₹');
   const [requireBarcode, setRequireBarcode] = useState(false);
+  const enableMultiplePrices = true;
   const [enableArabic, setEnableArabic] = useState(false);
   const [enableMalayalam, setEnableMalayalam] = useState(false);
   const [enableTamil, setEnableTamil] = useState(false);
@@ -167,6 +169,14 @@ export default function ItemFormScreen() {
         setImageUri(item.image_uri);
         setCategoryId(item.category_id);
         setBarcode(item.barcode || '');
+        if (item.prices_json) {
+          try {
+            const parsedPrices = JSON.parse(item.prices_json);
+            setPrices(parsedPrices.map((p: any) => ({ name: p.name, price: String(p.price) })));
+          } catch (e) {
+            console.log('Error parsing prices_json', e);
+          }
+        }
       }
     } else {
       setItemCode(generateItemCode());
@@ -180,8 +190,22 @@ export default function ItemFormScreen() {
   const handleSave = async () => {
     if (!itemCode.trim()) { Alert.alert('Validation', 'Item code is required'); return; }
     if (!itemName.trim()) { Alert.alert('Validation', 'Item name is required'); return; }
-    const rateNum = parseFloat(rate);
-    if (isNaN(rateNum) || rateNum < 0) { Alert.alert('Validation', 'Enter a valid rate'); return; }
+    
+    // Process prices
+    let rateNum = parseFloat(rate);
+    const validPrices = prices.filter(p => p.name.trim() !== '' && p.price.trim() !== '');
+    if (enableMultiplePrices && validPrices.length > 0) {
+      const firstPrice = parseFloat(validPrices[0].price);
+      if (isNaN(firstPrice) || firstPrice < 0) {
+        Alert.alert('Validation', 'Enter a valid price for the first variant');
+        return;
+      }
+      rateNum = firstPrice; // Use first variant as default rate
+    } else {
+      if (isNaN(rateNum) || rateNum < 0) { Alert.alert('Validation', 'Enter a valid rate'); return; }
+    }
+
+    const pricesJson = validPrices.length > 0 ? JSON.stringify(validPrices.map(p => ({ name: p.name.trim(), price: parseFloat(p.price) }))) : null;
 
     const unique = isItemCodeUnique(itemCode.trim(), isEdit ? parseInt(id!) : undefined);
     if (!unique) { Alert.alert('Duplicate Code', 'This item code already exists'); return; }
@@ -208,9 +232,9 @@ export default function ItemFormScreen() {
       }
 
       if (isEdit) {
-        updateItem(parseInt(id!), itemCode, itemName, itemNameAr, itemNameMl, itemNameTa, itemNameHi, itemNameKn, rateNum, categoryId, finalImageUri, 1, barcode);
+        updateItem(parseInt(id!), itemCode, itemName, itemNameAr, itemNameMl, itemNameTa, itemNameHi, itemNameKn, rateNum, categoryId, finalImageUri, 1, barcode, pricesJson);
       } else {
-        addItem(itemCode, itemName, itemNameAr, itemNameMl, itemNameTa, itemNameHi, itemNameKn, rateNum, categoryId, finalImageUri, barcode);
+        addItem(itemCode, itemName, itemNameAr, itemNameMl, itemNameTa, itemNameHi, itemNameKn, rateNum, categoryId, finalImageUri, barcode, pricesJson);
       }
 
       router.back();
@@ -274,6 +298,8 @@ export default function ItemFormScreen() {
                     itemNameKn={itemNameKn} setItemNameKn={setItemNameKn}
                     enableArabic={enableArabic} enableMalayalam={enableMalayalam} enableTamil={enableTamil} enableHindi={enableHindi} enableKannada={enableKannada}
                     rate={rate} setRate={setRate}
+                    prices={prices} setPrices={setPrices}
+                    enableMultiplePrices={enableMultiplePrices}
                     barcode={barcode} setBarcode={setBarcode}
                     requireBarcode={requireBarcode}
                     currencySymbol={currencySymbol}
@@ -316,6 +342,8 @@ export default function ItemFormScreen() {
                   itemNameKn={itemNameKn} setItemNameKn={setItemNameKn}
                   enableArabic={enableArabic} enableMalayalam={enableMalayalam} enableTamil={enableTamil} enableHindi={enableHindi} enableKannada={enableKannada}
                   rate={rate} setRate={setRate}
+                  prices={prices} setPrices={setPrices}
+                  enableMultiplePrices={enableMultiplePrices}
                   barcode={barcode} setBarcode={setBarcode}
                   requireBarcode={requireBarcode}
                   currencySymbol={currencySymbol}
@@ -372,7 +400,7 @@ function FormFields({
   itemCode, setItemCode, itemName, setItemName, 
   itemNameAr, setItemNameAr, itemNameMl, setItemNameMl, itemNameTa, setItemNameTa, itemNameHi, setItemNameHi, itemNameKn, setItemNameKn,
   enableArabic, enableMalayalam, enableTamil, enableHindi, enableKannada,
-  rate, setRate, barcode, setBarcode,
+  rate, setRate, prices, setPrices, enableMultiplePrices, barcode, setBarcode,
   requireBarcode, currencySymbol,
   categoryId, setCategoryId, categories,
   categoryDropdown, setCategoryDropdown, selectedCategory,
@@ -424,12 +452,73 @@ function FormFields({
         </View>
       )}
 
-      <Text style={[styles.label, { marginTop: Spacing.lg }]}>Rate ({currencySymbol}) *</Text>
-      <View style={styles.inputRow}>
-        <Text style={{ marginRight: 8, color: Colors.gold, fontFamily: 'Poppins-Bold' }}>{currencySymbol}</Text>
-        <TextInput style={styles.input} value={rate} onChangeText={setRate}
-          placeholder="0.00" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
-      </View>
+      {(!enableMultiplePrices || prices.length === 0) && (
+        <>
+          <Text style={[styles.label, { marginTop: Spacing.lg }]}>Rate ({currencySymbol}) *</Text>
+          <View style={styles.inputRow}>
+            <Text style={{ marginRight: 8, color: Colors.gold, fontFamily: 'Poppins-Bold' }}>{currencySymbol}</Text>
+            <TextInput style={styles.input} value={rate} onChangeText={setRate}
+              placeholder="0.00" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+          </View>
+        </>
+      )}
+
+      {enableMultiplePrices && (
+        <View style={{ marginTop: Spacing.lg }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.sm }}>
+            <Text style={styles.label}>Prices / Sizes</Text>
+            <TouchableOpacity onPress={() => setPrices([...prices, { name: '', price: '' }])}>
+              <Text style={{ color: Colors.gold, fontFamily: 'Poppins-Medium', fontSize: 13 }}>+ Add Variant</Text>
+            </TouchableOpacity>
+          </View>
+          
+          {prices.map((p: any, idx: number) => (
+            <View key={idx} style={{ flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+              <View style={[styles.inputRow, { flex: 1 }]}>
+                <TextInput 
+                  style={styles.input} 
+                  value={p.name} 
+                  onChangeText={(val) => {
+                    const newPrices = [...prices];
+                    newPrices[idx].name = val;
+                    setPrices(newPrices);
+                  }} 
+                  placeholder="e.g. Small" 
+                />
+              </View>
+              <View style={[styles.inputRow, { flex: 0.8 }]}>
+                <Text style={{ marginRight: 4, color: Colors.gold, fontFamily: 'Poppins-Bold' }}>{currencySymbol}</Text>
+                <TextInput 
+                  style={styles.input} 
+                  value={p.price} 
+                  onChangeText={(val) => {
+                    const newPrices = [...prices];
+                    newPrices[idx].price = val;
+                    setPrices(newPrices);
+                  }} 
+                  placeholder="0.00" 
+                  keyboardType="decimal-pad" 
+                />
+              </View>
+              <TouchableOpacity 
+                style={{ width: 48, height: 48, backgroundColor: Colors.errorBg, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' }}
+                onPress={() => {
+                  const newPrices = [...prices];
+                  newPrices.splice(idx, 1);
+                  setPrices(newPrices);
+                }}
+              >
+                <MaterialCommunityIcons name="delete-outline" size={20} color={Colors.error} />
+              </TouchableOpacity>
+            </View>
+          ))}
+          {prices.length === 0 && (
+            <Text style={{ ...Typography.caption, color: Colors.textMuted, marginTop: 4 }}>
+              Add size variants (e.g. Small, Jumbo) with different prices. The standard Rate above will be hidden if you add variants.
+            </Text>
+          )}
+        </View>
+      )}
 
       {/* Barcode (shown only if setting is enabled) */}
       {requireBarcode && (

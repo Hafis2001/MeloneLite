@@ -1,0 +1,23 @@
+diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStack.kt b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStack.kt
+index 1111111..2222222 100644
+--- a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStack.kt
++++ b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStack.kt
+@@ -348,8 +348,17 @@ class ScreenStack(
+ 
+     private fun performDraw(op: DrawingOp) {
+         // Canvas parameter can not be null here https://developer.android.com/reference/android/view/ViewGroup#drawChild(android.graphics.Canvas,%20android.view.View,%20long)
+         // So if we are passing null here, we would crash anyway
+-        super.drawChild(op.canvas!!, op.child, op.drawingTime)
++        val child = op.child ?: return
++        // Guard against child being removed between dispatchDraw and performDraw,
++        // which causes getChildDrawingOrder() to return an invalid index on Android.
++        if (indexOfChild(child) < 0) return
++        try {
++            super.drawChild(op.canvas!!, child, op.drawingTime)
++        } catch (e: IndexOutOfBoundsException) {
++            // Swallow the Android drawing order race condition crash.
++            // This can occur when a child view is removed while drawing is in progress.
++        }
+     }
+ 
+     // Can't use `drawingOpPool.removeLast` here due to issues with static name resolution in Android SDK 35+.

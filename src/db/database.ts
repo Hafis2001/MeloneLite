@@ -92,6 +92,7 @@ export const initDatabase = async (): Promise<void> => {
     'ALTER TABLE categories ADD COLUMN name_hi TEXT;',
     'ALTER TABLE items ADD COLUMN item_name_kn TEXT;',
     'ALTER TABLE categories ADD COLUMN name_kn TEXT;',
+    'ALTER TABLE items ADD COLUMN prices_json TEXT;'
   ];
 
   migrations.forEach(sql => {
@@ -142,6 +143,7 @@ export const initDatabase = async (): Promise<void> => {
     ('enable_hindi', '0'),
     ('enable_kannada', '0'),
     ('theme_primary', '#D4A853'),
-    ('theme_secondary', 'default');
+    ('theme_secondary', 'default'),
+    ('enable_multiple_prices', '0');
   `);
 };

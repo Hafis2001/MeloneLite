@@ -357,6 +357,7 @@ export default function UtilitySettingsScreen() {
             oldCat.name_ml || null,
             oldCat.name_ta || null,
             oldCat.name_hi || null,
+            oldCat.name_kn || null,
             oldCat.color || '#D4A853'
           );
           categoryIdMap.set(oldCat.id, newId);
@@ -381,11 +382,13 @@ export default function UtilitySettingsScreen() {
             item.item_name_ml || null,
             item.item_name_ta || null,
             item.item_name_hi || null,
+            item.item_name_kn || null,
             item.rate,
             newCategoryId,
             item.image_uri || null,
             item.is_available,
-            item.barcode || null
+            item.barcode || null,
+            item.prices_json || null
           );
           itemsUpdated++;
         } else {
@@ -397,10 +400,12 @@ export default function UtilitySettingsScreen() {
             item.item_name_ml || null,
             item.item_name_ta || null,
             item.item_name_hi || null,
+            item.item_name_kn || null,
             item.rate,
             newCategoryId,
             item.image_uri || null,
-            item.barcode || null
+            item.barcode || null,
+            item.prices_json || null
           );
           itemsAdded++;
         }
@@ -441,11 +446,13 @@ export default function UtilitySettingsScreen() {
                     currentItem.item_name_ml,
                     currentItem.item_name_ta,
                     currentItem.item_name_hi,
+                    currentItem.item_name_kn,
                     currentItem.rate,
                     currentItem.category_id,
                     url,
                     currentItem.is_available,
-                    currentItem.barcode
+                    currentItem.barcode,
+                    currentItem.prices_json
                   );
                   generatedCount++;
                 }

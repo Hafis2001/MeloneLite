@@ -175,6 +175,7 @@ export default function TabsLayout() {
       <Tabs
       screenOptions={{
         headerShown: false,
+        detachInactiveScreens: Platform.OS === 'ios',
         tabBarStyle: [
           styles.tabBar, 
           { 

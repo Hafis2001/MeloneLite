@@ -16,6 +16,7 @@ export interface Settings {
   enable_kannada?: string;
   auto_generate_image?: string;
   add_product_by_click?: string;
+  enable_multiple_prices?: string;
 }
 
 export const getSetting = (key: string): string => {

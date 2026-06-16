@@ -27,12 +27,19 @@ export default function MenuScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [requireBarcode, setRequireBarcode] = useState(false);
   const [addProductByClick, setAddProductByClick] = useState(false);
+  const enableMultiplePrices = true;
 
   // Barcode → quantity modal
   const [barcodeModalItem, setBarcodeModalItem] = useState<Item | null>(null);
   const [barcodeQty, setBarcodeQty] = useState(1);
   const [barcodeModalVisible, setBarcodeModalVisible] = useState(false);
   const scaleAnim = useRef(new Animated.Value(0.85)).current;
+
+  // Variant modal
+  const [variantModalVisible, setVariantModalVisible] = useState(false);
+  const [variantModalItem, setVariantModalItem] = useState<{ item: Item, prices: {name: string, price: number}[] } | null>(null);
+  const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
+  const [variantQty, setVariantQty] = useState(1);
 
   const { addItem, getItemQuantity, updateQuantity, getTotalItems, getSubtotal } = useCart();
   const { width, height } = useWindowDimensions();
@@ -70,9 +77,8 @@ export default function MenuScreen() {
     }
   }, [params.scannedBarcode]);
 
-  // Animate modal open
   useEffect(() => {
-    if (barcodeModalVisible) {
+    if (barcodeModalVisible || variantModalVisible) {
       Animated.spring(scaleAnim, {
         toValue: 1, useNativeDriver: true,
         tension: 120, friction: 8,
@@ -80,7 +86,7 @@ export default function MenuScreen() {
     } else {
       scaleAnim.setValue(0.85);
     }
-  }, [barcodeModalVisible]);
+  }, [barcodeModalVisible, variantModalVisible]);
 
   const loadData = useCallback(() => {
     setItems(getAllItems());
@@ -143,6 +149,30 @@ export default function MenuScreen() {
     closeBarcodeModal();
   };
 
+  const openVariantModal = (item: Item, prices: {name: string, price: number}[]) => {
+    setVariantModalItem({ item, prices });
+    setSelectedVariantIdx(0);
+    setVariantQty(1);
+    setVariantModalVisible(true);
+  };
+
+  const closeVariantModal = () => {
+    setVariantModalVisible(false);
+    setVariantModalItem(null);
+  };
+
+  const confirmVariantAdd = () => {
+    if (!variantModalItem) return;
+    const { item, prices } = variantModalItem;
+    const selectedVariant = prices[selectedVariantIdx];
+    
+    addItem(item, selectedVariant);
+    if (variantQty > 1) {
+      updateQuantity(`${item.id}-${selectedVariant.name}`, variantQty);
+    }
+    closeVariantModal();
+  };
+
   const renderCategoryPill = ({ item }: { item: Category }) => {
     const isSelected = selectedCategoryId === item.id;
     return (
@@ -168,11 +198,21 @@ export default function MenuScreen() {
     // In landscape phone, reduce image height
     const imgHeight = isLandscape && isPhone ? 80 : 120;
 
+    let parsedPrices: any[] = [];
+    if (enableMultiplePrices && item.prices_json) {
+      try { parsedPrices = JSON.parse(item.prices_json); } catch(e) {}
+    }
+    const hasVariants = parsedPrices.length > 0;
+
     const handleCardPress = () => {
-      if (qty === 0) {
-        addItem(item);
+      if (hasVariants) {
+        openVariantModal(item, parsedPrices);
       } else {
-        updateQuantity(item.id, qty + 1);
+        if (qty === 0) {
+          addItem(item);
+        } else {
+          updateQuantity(`${item.id}-default`, qty + 1);
+        }
       }
     };
 
@@ -213,11 +253,19 @@ export default function MenuScreen() {
             style={styles.itemName} 
             numberOfLines={2} 
           />
-          <Text style={styles.itemCode}>{item.item_code}</Text>
           <View style={styles.cardFooter}>
             <Text style={styles.itemPrice}>{formatCurrency(item.rate)}</Text>
             <View style={styles.actionContainer}>
-              {qty === 0 ? (
+              {hasVariants ? (
+                <TouchableOpacity
+                  style={styles.addBtnFull}
+                  onPress={() => openVariantModal(item, parsedPrices)}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons name="format-list-bulleted" size={18} color={Colors.textInverse} />
+                  <Text style={styles.addBtnFullText}>Options {qty > 0 ? `(${qty})` : ''}</Text>
+                </TouchableOpacity>
+              ) : qty === 0 ? (
                 <TouchableOpacity
                   style={styles.addBtnFull}
                   onPress={() => addItem(item)}
@@ -230,14 +278,14 @@ export default function MenuScreen() {
                 <View style={styles.qtyControlsFull}>
                   <TouchableOpacity
                     style={styles.qtyBtn}
-                    onPress={() => updateQuantity(item.id, qty - 1)}
+                    onPress={() => updateQuantity(`${item.id}-default`, qty - 1)}
                   >
                     <MaterialCommunityIcons name="minus" size={20} color={Colors.gold} />
                   </TouchableOpacity>
                   <Text style={styles.qtyTextFull}>{qty}</Text>
                   <TouchableOpacity
                     style={styles.qtyBtn}
-                    onPress={() => updateQuantity(item.id, qty + 1)}
+                    onPress={() => updateQuantity(`${item.id}-default`, qty + 1)}
                   >
                     <MaterialCommunityIcons name="plus" size={20} color={Colors.gold} />
                   </TouchableOpacity>
@@ -468,6 +516,101 @@ export default function MenuScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {/* Variant Selection Modal */}
+      <Modal
+        visible={variantModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeVariantModal}
+      >
+        <TouchableWithoutFeedback onPress={closeVariantModal}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <Animated.View style={[styles.modalCard, { transform: [{ scale: scaleAnim }] }]}>
+                {variantModalItem && (
+                  <>
+                    <View style={styles.modalItemHeader}>
+                      {variantModalItem.item.image_uri ? (
+                        <Image source={{ uri: variantModalItem.item.image_uri }} style={styles.modalItemImage} resizeMode="cover" />
+                      ) : (
+                        <View style={styles.modalItemImagePlaceholder}>
+                          <MaterialCommunityIcons name="food-variant" size={32} color={Colors.textMuted} />
+                        </View>
+                      )}
+                      <View style={{ flex: 1, marginLeft: Spacing.md }}>
+                        <Text style={styles.modalItemName} numberOfLines={2}>{variantModalItem.item.item_name}</Text>
+                        <Text style={styles.modalItemPrice}>{formatCurrency(variantModalItem.prices[selectedVariantIdx].price)}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.modalDivider} />
+
+                    <Text style={styles.modalQtyLabel}>Select Size/Variant</Text>
+                    <View style={{ gap: Spacing.sm, marginBottom: Spacing.lg, maxHeight: 200 }}>
+                      <ScrollView showsVerticalScrollIndicator={false}>
+                        {variantModalItem.prices.map((p, idx) => (
+                          <TouchableOpacity
+                            key={idx}
+                            style={[
+                              styles.variantOption,
+                              selectedVariantIdx === idx && styles.variantOptionActive
+                            ]}
+                            onPress={() => setSelectedVariantIdx(idx)}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <View style={[styles.radioOuter, selectedVariantIdx === idx && styles.radioOuterActive]}>
+                                {selectedVariantIdx === idx && <View style={styles.radioInner} />}
+                              </View>
+                              <Text style={[styles.variantName, selectedVariantIdx === idx && styles.variantNameActive]}>
+                                {p.name}
+                              </Text>
+                            </View>
+                            <Text style={[styles.variantPrice, selectedVariantIdx === idx && styles.variantPriceActive]}>
+                              {formatCurrency(p.price)}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+
+                    {/* Quantity selector */}
+                    <Text style={styles.modalQtyLabel}>Quantity</Text>
+                    <View style={styles.modalQtyRow}>
+                      <TouchableOpacity
+                        style={[styles.modalQtyBtn, variantQty <= 1 && { opacity: 0.4 }]}
+                        onPress={() => setVariantQty(q => Math.max(1, q - 1))}
+                        disabled={variantQty <= 1}
+                      >
+                        <MaterialCommunityIcons name="minus" size={20} color={Colors.gold} />
+                      </TouchableOpacity>
+                      <View style={styles.modalQtyDisplay}>
+                        <Text style={styles.modalQtyNumber}>{variantQty}</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.modalQtyBtn}
+                        onPress={() => setVariantQty(q => q + 1)}
+                      >
+                        <MaterialCommunityIcons name="plus" size={20} color={Colors.gold} />
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.modalBtns}>
+                      <TouchableOpacity style={styles.modalCancelBtn} onPress={closeVariantModal}>
+                        <Text style={styles.modalCancelText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.modalAddBtn} onPress={confirmVariantAdd}>
+                        <MaterialCommunityIcons name="cart-plus" size={18} color={Colors.textInverse} />
+                        <Text style={styles.modalAddText}>Add to Cart</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </Animated.View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -529,13 +672,13 @@ function createStyles() {
     borderWidth: 1, borderColor: Colors.border,
     ...Shadows.card,
   },
-  itemImage: { width: '100%', height: 120 },
+  itemImage: { width: '100%', height: 90 },
   itemImagePlaceholder: {
-    width: '100%', height: 120,
+    width: '100%', height: 90,
     backgroundColor: Colors.surface,
     alignItems: 'center', justifyContent: 'center',
   },
-  cardContent: { padding: Spacing.md },
+  cardContent: { padding: 10 },
   categoryTag: {
     alignSelf: 'flex-start',
     borderWidth: 1, borderRadius: Radius.full,
@@ -544,7 +687,7 @@ function createStyles() {
   categoryTagText: { fontSize: 9, fontFamily: 'Poppins-Medium' },
   itemName: { ...Typography.bodyMedium, fontSize: 13, lineHeight: 18, marginBottom: 2 },
   itemCode: { ...Typography.caption, fontSize: 10 },
-  cardFooter: { marginTop: Spacing.sm },
+  cardFooter: { marginTop: 2 },
   actionContainer: { marginTop: Spacing.sm, width: '100%' },
   itemPrice: { ...Typography.price, fontSize: 15 },
   addBtnFull: {
@@ -667,5 +810,26 @@ function createStyles() {
     paddingVertical: 14, alignItems: 'center', ...Shadows.goldGlow,
   },
   modalCloseBtnText: { fontFamily: 'Poppins-Bold', fontSize: 15, color: Colors.textInverse },
+
+  // Variant Option
+  variantOption: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: Spacing.md, borderRadius: Radius.md,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface,
+    marginBottom: Spacing.sm,
+  },
+  variantOptionActive: {
+    borderColor: Colors.gold, backgroundColor: Colors.goldOverlay,
+  },
+  radioOuter: {
+    width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: Colors.border,
+    alignItems: 'center', justifyContent: 'center', marginRight: Spacing.md,
+  },
+  radioOuterActive: { borderColor: Colors.gold },
+  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.gold },
+  variantName: { ...Typography.bodyMedium, color: Colors.textPrimary },
+  variantNameActive: { color: Colors.gold },
+  variantPrice: { ...Typography.priceSmall, color: Colors.textMuted },
+  variantPriceActive: { color: Colors.gold },
   });
 }

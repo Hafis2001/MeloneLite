@@ -1,8 +1,11 @@
+import { enableScreens } from 'react-native-screens';
+enableScreens(false);
+
 import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
-import { View, Text, StyleSheet, ActivityIndicator, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, useWindowDimensions, Platform } from 'react-native';
 import * as Linking from 'expo-linking';
 import { useFonts } from 'expo-font';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -84,11 +87,27 @@ export default function RootLayout() {
       setIsLicensed(isCurrentlyLicensed);
 
       const inAuthGroup = segments[0] === 'license';
+      const inOnboarding = segments[0] === 'onboarding';
 
       if (!isCurrentlyLicensed && !inAuthGroup) {
         router.replace('/license');
       } else if (isCurrentlyLicensed && inAuthGroup) {
-        router.replace('/(tabs)');
+        // Check if this is the very first login — show onboarding
+        const onboardingDone = await AsyncStorage.getItem('onboarding_complete');
+        if (!onboardingDone) {
+          router.replace('/onboarding');
+        } else {
+          router.replace('/(tabs)');
+        }
+      } else if (isCurrentlyLicensed && !inOnboarding) {
+        // If already licensed and navigating normally, ensure onboarding is not missed
+        const onboardingDone = await AsyncStorage.getItem('onboarding_complete');
+        if (!onboardingDone && segments[0] !== 'onboarding') {
+          // Only redirect if not already in tabs (to avoid redirect loops)
+          if (segments[0] === '(tabs)' || segments.length === 0) {
+            router.replace('/onboarding');
+          }
+        }
       }
     };
     checkAuth();
@@ -192,14 +211,14 @@ export default function RootLayout() {
           <StatusBar key={`status-${themeVersion}`} style="light" backgroundColor={Colors.background} />
           <View style={{ flex: 1, flexDirection: 'row', backgroundColor: Colors.background }}>
             <View style={{ flex: 1 }}>
-            <Stack screenOptions={{ headerShown: false }}>
+            <Stack screenOptions={{ headerShown: false, animation: Platform.OS === 'android' ? 'fade' : 'default', detachInactiveScreens: Platform.OS === 'ios' }}>
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen
                 name="cart"
                 options={{
                   headerShown: false,
                   presentation: 'modal',
-                  animation: 'slide_from_bottom',
+                  animation: Platform.OS === 'android' ? 'fade' : 'slide_from_bottom',
                 }}
               />
               <Stack.Screen
@@ -207,7 +226,7 @@ export default function RootLayout() {
                 options={{
                   headerShown: false,
                   presentation: 'modal',
-                  animation: 'slide_from_right',
+                  animation: Platform.OS === 'android' ? 'fade' : 'slide_from_right',
                 }}
               />
               <Stack.Screen
@@ -215,7 +234,7 @@ export default function RootLayout() {
                 options={{
                   headerShown: false,
                   presentation: 'modal',
-                  animation: 'slide_from_bottom',
+                  animation: Platform.OS === 'android' ? 'fade' : 'slide_from_bottom',
                 }}
               />
               <Stack.Screen
@@ -223,23 +242,10 @@ export default function RootLayout() {
                 options={{
                   headerShown: false,
                   presentation: 'modal',
-                  animation: 'slide_from_bottom',
+                  animation: Platform.OS === 'android' ? 'fade' : 'slide_from_bottom',
                 }}
               />
-              <Stack.Screen
-                name="order-detail"
-                options={{
-                  headerShown: false,
-                  animation: 'slide_from_right',
-                }}
-              />
-              <Stack.Screen
-                name="settings"
-                options={{
-                  headerShown: false,
-                  animation: 'slide_from_right',
-                }}
-              />
+
               <Stack.Screen 
                 name="license" 
                 options={{ 
@@ -247,6 +253,14 @@ export default function RootLayout() {
                   gestureEnabled: false,
                   animation: 'fade',
                 }} 
+              />
+              <Stack.Screen
+                name="onboarding"
+                options={{
+                  headerShown: false,
+                  gestureEnabled: false,
+                  animation: Platform.OS === 'android' ? 'fade' : 'fade',
+                }}
               />
             </Stack>
           </View>
