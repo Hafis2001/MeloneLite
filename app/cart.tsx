@@ -1,10 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, KeyboardAvoidingView, Platform, useWindowDimensions,
   Modal, TouchableWithoutFeedback,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useSegments } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCart } from '../src/context/CartContext';
@@ -18,9 +18,16 @@ import { DualText } from '../src/components/DualText';
 import { useActiveLanguage } from '../src/context/ThemeContext';
 import { t } from '../src/utils/translations';
 
+import { useThemeVersion } from '../src/context/ThemeContext';
+import { syncOrders } from '../backgroundSync';
+
 const PAYMENT_METHODS = ['Cash', 'Card', 'UPI'];
 
 export default function CartScreen() {
+  const themeVersion = useThemeVersion();
+  const segments = useSegments();
+  const isStandalone = segments.includes('cart');
+  const styles = useMemo(() => createStyles(), [themeVersion]);
   const {
     state, removeItem, updateQuantity, clearCart,
     setCustomerName, setTableNo, setPaymentMethod, setNotes, setDiscount,
@@ -31,6 +38,9 @@ export default function CartScreen() {
   const [placing, setPlacing] = useState(false);
   const [customerModalVisible, setCustomerModalVisible] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
+  const [lastOrderId, setLastOrderId] = useState<number | null>(null);
+  const [lastOrderTotal, setLastOrderTotal] = useState<number>(0);
   const lang = useActiveLanguage();
 
   const { width, height } = useWindowDimensions();
@@ -109,28 +119,11 @@ export default function CartScreen() {
         },
         orderItems
       );
-      clearCart();
-      Alert.alert('Order Placed! 🎉', `Grand Total: ${formatCurrency(grandTotal)}`, [
-        { 
-          text: 'Print Receipt', 
-          onPress: async () => {
-            router.dismiss();
-            await handleDirectPrint(orderId);
-          }
-        },
-        { 
-          text: 'View Orders', 
-          onPress: () => { 
-            router.dismiss(); 
-            router.push('/(tabs)/orders'); 
-          } 
-        },
-        { 
-          text: 'OK', 
-          onPress: () => router.dismiss(),
-          style: 'cancel'
-        },
-      ]);
+      setLastOrderId(orderId);
+      setLastOrderTotal(grandTotal);
+      setSuccessModalVisible(true);
+      // Attempt to sync immediately in the background
+      syncOrders().catch(() => {});
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Could not place order');
     } finally {
@@ -144,10 +137,10 @@ export default function CartScreen() {
         <View style={[styles.contentWrapper, isLandscapePhone && { paddingHorizontal: Spacing.xl }]}>
           {/* Header */}
         <View style={[styles.header, isLandscapePhone && styles.headerLandscape]}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.dismiss()}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => { if (isStandalone && router.canGoBack()) router.back(); }}>
             <MaterialCommunityIcons name="chevron-down" size={26} color={Colors.textPrimary} />
           </TouchableOpacity>
-          <DualText text="Your Order" style={styles.headerTitle} />
+          <Text style={styles.headerTitle}>Your Order</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
             <TouchableOpacity onPress={() => setCustomerModalVisible(true)} style={styles.headerIconBtn}>
               <MaterialCommunityIcons name="clipboard-text-outline" size={24} color={Colors.gold} />
@@ -163,127 +156,129 @@ export default function CartScreen() {
           </View>
         </View>
 
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-
+        <View style={{ flex: 1 }}>
           {/* Empty state */}
           {state.items.length === 0 ? (
             <View style={styles.emptyState}>
               <MaterialCommunityIcons name="cart-off" size={64} color={Colors.textMuted} />
-              <DualText text="Cart is Empty" style={styles.emptyTitle} />
-              <DualText text="Add items from the Menu tab" style={styles.emptySubtitle} />
+              <Text style={styles.emptyTitle}>Cart is Empty</Text>
+              <Text style={styles.emptySubtitle}>Add items from the Menu tab</Text>
             </View>
           ) : (
             <>
-              {/* Cart Items */}
-              <View style={styles.section}>
+              {/* Cart Items (Scrollable) */}
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg }} showsVerticalScrollIndicator={false}>
+                <View style={[styles.section, { marginBottom: Spacing.md }]}>
                 {state.items.map(ci => (
                   <View key={ci.cartItemId} style={styles.cartItem}>
-                    <View style={styles.cartItemInfo}>
-                      <Text style={styles.cartItemName}>{ci.item.item_name}</Text>
-                      {ci.selectedVariant && (
-                        <Text style={{ ...Typography.caption, color: Colors.gold, marginTop: 1 }}>Variant: {ci.selectedVariant.name}</Text>
-                      )}
-                      <Text style={styles.cartItemRate}>{formatCurrency(ci.selectedVariant ? ci.selectedVariant.price : ci.item.rate)} {t('each', lang)}</Text>
-                    </View>
-                    <View style={styles.qtyControls}>
-                      <TouchableOpacity style={styles.qtyBtn}
-                        onPress={() => updateQuantity(ci.cartItemId, ci.quantity - 1)}>
-                        <MaterialCommunityIcons name="minus" size={14} color={Colors.gold} />
-                      </TouchableOpacity>
-                      <Text style={styles.qtyText}>{ci.quantity}</Text>
-                      <TouchableOpacity style={styles.qtyBtn}
-                        onPress={() => updateQuantity(ci.cartItemId, ci.quantity + 1)}>
-                        <MaterialCommunityIcons name="plus" size={14} color={Colors.gold} />
+                    <View style={styles.cartItemTopRow}>
+                      <Text style={styles.cartItemName} numberOfLines={1}>
+                        {ci.item.item_name}
+                        {ci.selectedVariant ? ` — ${ci.selectedVariant.name}` : ''}
+                      </Text>
+                      <TouchableOpacity onPress={() => removeItem(ci.cartItemId)} style={styles.removeBtn}>
+                        <MaterialCommunityIcons name="close" size={16} color={Colors.textMuted} />
                       </TouchableOpacity>
                     </View>
-                    <Text style={styles.cartItemSubtotal}>{formatCurrency((ci.selectedVariant ? ci.selectedVariant.price : ci.item.rate) * ci.quantity)}</Text>
-                    <TouchableOpacity onPress={() => removeItem(ci.cartItemId)} style={styles.removeBtn}>
-                      <MaterialCommunityIcons name="close" size={16} color={Colors.textMuted} />
-                    </TouchableOpacity>
+                    <View style={styles.cartItemBottomRow}>
+                      <Text style={styles.cartItemRate}>{formatCurrency(ci.selectedVariant ? ci.selectedVariant.price : ci.item.rate)}</Text>
+                      <View style={styles.qtyControls}>
+                        <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(ci.cartItemId, ci.quantity - 1)}>
+                          <MaterialCommunityIcons name="minus" size={14} color={Colors.gold} />
+                        </TouchableOpacity>
+                        <Text style={styles.qtyText}>{ci.quantity}</Text>
+                        <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(ci.cartItemId, ci.quantity + 1)}>
+                          <MaterialCommunityIcons name="plus" size={14} color={Colors.gold} />
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={styles.cartItemSubtotal}>{formatCurrency((ci.selectedVariant ? ci.selectedVariant.price : ci.item.rate) * ci.quantity)}</Text>
+                    </View>
                   </View>
                 ))}
-              </View>
+                </View>
+              </ScrollView>
 
-              {/* Payment Method Inline Dropdown Trigger */}
-              <View style={[styles.section, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: Spacing.md }]}>
-                <DualText text="Payment Method" style={[styles.sectionTitle, { marginBottom: 0 }]} />
-                <TouchableOpacity 
-                  style={styles.paymentDropdownBtn}
-                  onPress={() => setPaymentModalVisible(true)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.paymentDropdownText}>{state.isSplitPayment ? 'Split' : state.paymentMethod}</Text>
-                  <MaterialCommunityIcons name="chevron-down" size={18} color={Colors.textInverse} />
-                </TouchableOpacity>
-              </View>
-
-              {state.isSplitPayment && (
-                <View style={[styles.section, { paddingVertical: Spacing.md }]}>
-                  <View style={styles.splitInputContainer}>
-                    <View style={styles.splitInputBox}>
-                      <DualText text="Cash Amount" style={styles.splitLabel} />
-                      <View style={styles.inputGroup}>
-                        <MaterialCommunityIcons name="cash" size={18} color={Colors.gold} />
-                        <TextInput 
-                          style={styles.input} 
-                          placeholder="0.00" 
-                          keyboardType="decimal-pad"
-                          value={state.cashAmount > 0 ? state.cashAmount.toString() : ''}
-                          onChangeText={v => {
-                            const val = parseFloat(v) || 0;
-                            setCashAmount(val);
-                            setUpiAmount(Math.max(0, grandTotal - val));
-                          }}
-                        />
+              {/* Fixed Bottom Container */}
+              <View style={{ paddingHorizontal: Spacing.lg, paddingBottom: Spacing.sm }}>
+                
+                {state.isSplitPayment && (
+                  <View style={[styles.section, { paddingVertical: Spacing.sm, marginBottom: Spacing.sm }]}>
+                    <View style={styles.splitInputContainer}>
+                      <View style={styles.splitInputBox}>
+                        <Text style={styles.splitLabel}>Cash Amount</Text>
+                        <View style={styles.inputGroup}>
+                          <MaterialCommunityIcons name="cash" size={18} color={Colors.gold} />
+                          <TextInput 
+                            style={styles.input} 
+                            placeholder="0.00" 
+                            keyboardType="decimal-pad"
+                            value={state.cashAmount > 0 ? state.cashAmount.toString() : ''}
+                            onChangeText={v => {
+                              const val = parseFloat(v) || 0;
+                              setCashAmount(val);
+                              setUpiAmount(Math.max(0, grandTotal - val));
+                            }}
+                          />
+                        </View>
                       </View>
-                    </View>
-                    <View style={styles.splitInputBox}>
-                      <DualText text="UPI Amount" style={styles.splitLabel} />
-                      <View style={styles.inputGroup}>
-                        <MaterialCommunityIcons name="cellphone-nfc" size={18} color={Colors.gold} />
-                        <TextInput 
-                          style={styles.input} 
-                          placeholder="0.00" 
-                          keyboardType="decimal-pad"
-                          value={state.upiAmount > 0 ? state.upiAmount.toString() : ''}
-                          onChangeText={v => {
-                            const val = parseFloat(v) || 0;
-                            setUpiAmount(val);
-                            setCashAmount(Math.max(0, grandTotal - val));
-                          }}
-                        />
+                      <View style={styles.splitInputBox}>
+                        <Text style={styles.splitLabel}>UPI Amount</Text>
+                        <View style={styles.inputGroup}>
+                          <MaterialCommunityIcons name="cellphone-nfc" size={18} color={Colors.gold} />
+                          <TextInput 
+                            style={styles.input} 
+                            placeholder="0.00" 
+                            keyboardType="decimal-pad"
+                            value={state.upiAmount > 0 ? state.upiAmount.toString() : ''}
+                            onChangeText={v => {
+                              const val = parseFloat(v) || 0;
+                              setUpiAmount(val);
+                              setCashAmount(Math.max(0, grandTotal - val));
+                            }}
+                          />
+                        </View>
                       </View>
                     </View>
                   </View>
-                </View>
-              )}
+                )}
 
-              <View style={styles.section}>
-                <DualText text="Bill Summary" style={styles.sectionTitle} />
+              <View style={[styles.section, { marginBottom: 0, paddingVertical: Spacing.sm }]}>
+                <Text style={styles.sectionTitle}>Bill Summary</Text>
                 <View style={styles.billRow}>
-                  <DualText text="Subtotal" style={styles.billLabel} />
+                  <Text style={styles.billLabel}>Subtotal</Text>
                   <Text style={styles.billValue}>{formatCurrency(subtotal)}</Text>
                 </View>
                 {discountAmt > 0 && (
                   <View style={styles.billRow}>
-                    <DualText text="Discount" style={styles.billLabel} />
+                    <Text style={styles.billLabel}>Discount</Text>
                     <Text style={[styles.billValue, { color: Colors.error }]}>- {formatCurrency(discountAmt)}</Text>
                   </View>
                 )}
+                
+                <View style={[styles.billRow, { marginVertical: 4, alignItems: 'center' }]}>
+                  <Text style={styles.billLabel}>Payment</Text>
+                  <TouchableOpacity 
+                    style={[styles.paymentDropdownBtn, { paddingVertical: 4, paddingHorizontal: 8 }]}
+                    onPress={() => setPaymentModalVisible(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.paymentDropdownText, { fontSize: 12 }]}>{state.isSplitPayment ? 'Split' : state.paymentMethod}</Text>
+                    <MaterialCommunityIcons name="chevron-down" size={14} color={Colors.textInverse} />
+                  </TouchableOpacity>
+                </View>
 
-                <View style={[styles.billRow, styles.grandRow]}>
-                  <DualText text="Grand Total" style={styles.grandLabel} />
+                <View style={[styles.billRow, styles.grandRow, { marginTop: 4, paddingTop: 6 }]}>
+                  <Text style={styles.grandLabel}>Grand Total</Text>
                   <Text style={styles.grandValue}>{formatCurrency(grandTotal)}</Text>
                 </View>
               </View>
+              </View>
             </>
           )}
-          <View style={{ height: 20 }} />
-        </ScrollView>
 
         {/* Place Order Button */}
         {state.items.length > 0 && (
-          <View style={styles.footer}>
+          <View style={[styles.footer, { paddingHorizontal: Spacing.lg, paddingBottom: 16 }]}>
             <TouchableOpacity
               style={[styles.placeOrderBtn, placing && { opacity: 0.7 }]}
               onPress={handlePlaceOrder}
@@ -292,10 +287,10 @@ export default function CartScreen() {
             >
               <MaterialCommunityIcons name="check-circle-outline" size={22} color={Colors.textInverse} />
               {placing ? (
-                <Text style={styles.placeOrderText}>{t('Placing Order...', lang)}</Text>
+                <Text style={styles.placeOrderText}>Saving...</Text>
               ) : (
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <DualText text="Place Order" style={styles.placeOrderText} />
+                  <Text style={styles.placeOrderText}>Save</Text>
                   <Text style={styles.placeOrderText}>  •  {formatCurrency(grandTotal)}</Text>
                 </View>
               )}
@@ -303,6 +298,7 @@ export default function CartScreen() {
           </View>
         )}
         </View>
+      </View>
 
         {/* Modals */}
         <Modal visible={customerModalVisible} transparent animationType="fade" onRequestClose={() => setCustomerModalVisible(false)}>
@@ -311,7 +307,7 @@ export default function CartScreen() {
               <TouchableWithoutFeedback>
                 <View style={styles.modalCard}>
                   <View style={styles.modalHeader}>
-                    <DualText text="Order Details" style={styles.modalTitle} />
+                    <Text style={styles.modalTitle}>Order Details</Text>
                     <TouchableOpacity onPress={() => setCustomerModalVisible(false)}>
                       <MaterialCommunityIcons name="close" size={24} color={Colors.textPrimary} />
                     </TouchableOpacity>
@@ -319,19 +315,19 @@ export default function CartScreen() {
                   
                   <View style={styles.inputGroup}>
                     <MaterialCommunityIcons name="account-outline" size={18} color={Colors.gold} />
-                    <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Customer Name (optional) / اسم العميل (اختياري)' : getSetting('enable_malayalam') === '1' ? 'Customer Name (optional) / ഉപഭോക്താവിന്റെ പേര് (നിർബന്ധമില്ല)' : getSetting('enable_tamil') === '1' ? 'Customer Name (optional) / வாடிக்கையாளர் பெயர் (விருப்பத்திற்குரியது)' : 'Customer Name (optional)'}
+                    <TextInput style={styles.input} placeholder="Customer Name (optional)"
                       placeholderTextColor={Colors.textMuted} value={state.customerName}
                       onChangeText={setCustomerName} />
                   </View>
                   <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
                     <MaterialCommunityIcons name="table-chair" size={18} color={Colors.gold} />
-                    <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Table No. (optional) / رقم الطاولة (اختياري)' : getSetting('enable_malayalam') === '1' ? 'Table No. (optional) / ടേബിൾ നമ്പർ (നിർബന്ധമില്ല)' : getSetting('enable_tamil') === '1' ? 'Table No. (optional) / மேஜை எண் (விருப்பத்திற்குரியது)' : 'Table No. (optional)'}
+                    <TextInput style={styles.input} placeholder="Table No. (optional)"
                       placeholderTextColor={Colors.textMuted} value={state.tableNo}
                       onChangeText={setTableNo} keyboardType="numeric" />
                   </View>
                   <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
                     <MaterialCommunityIcons name="tag-outline" size={18} color={Colors.gold} />
-                    <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Discount amount / قيمة الخصم' : getSetting('enable_malayalam') === '1' ? 'Discount amount / കിഴിവ്' : getSetting('enable_tamil') === '1' ? 'Discount amount / தள்ளுபடி தொகை' : 'Discount amount'}
+                    <TextInput style={styles.input} placeholder="Discount amount"
                       placeholderTextColor={Colors.textMuted}
                       value={state.discount > 0 ? state.discount.toString() : ''}
                       onChangeText={v => setDiscount(parseFloat(v) || 0)}
@@ -339,13 +335,13 @@ export default function CartScreen() {
                   </View>
                   <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
                     <MaterialCommunityIcons name="note-text-outline" size={18} color={Colors.gold} />
-                    <TextInput style={styles.input} placeholder={getSetting('enable_arabic') === '1' ? 'Notes (optional) / ملاحظات (اختياري)' : getSetting('enable_malayalam') === '1' ? 'Notes (optional) / കുറിപ്പുകൾ (നിർബന്ധമില്ല)' : getSetting('enable_tamil') === '1' ? 'Notes (optional) / குறிப்புகள் (விருப்பத்திற்குரியது)' : 'Notes (optional)'}
+                    <TextInput style={styles.input} placeholder="Notes (optional)"
                       placeholderTextColor={Colors.textMuted} value={state.notes}
                       onChangeText={setNotes} />
                   </View>
 
                   <TouchableOpacity style={styles.modalDoneBtn} onPress={() => setCustomerModalVisible(false)}>
-                    <DualText text="Done" style={styles.modalDoneText} />
+                    <Text style={styles.modalDoneText}>Done</Text>
                   </TouchableOpacity>
                 </View>
               </TouchableWithoutFeedback>
@@ -359,7 +355,7 @@ export default function CartScreen() {
               <TouchableWithoutFeedback>
                 <View style={styles.modalCard}>
                   <View style={styles.modalHeader}>
-                    <DualText text="Select Payment Method" style={styles.modalTitle} />
+                    <Text style={styles.modalTitle}>Select Payment Method</Text>
                     <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
                       <MaterialCommunityIcons name="close" size={24} color={Colors.textPrimary} />
                     </TouchableOpacity>
@@ -393,12 +389,51 @@ export default function CartScreen() {
             </View>
           </TouchableWithoutFeedback>
         </Modal>
+        {/* Success Modal */}
+        <Modal visible={successModalVisible} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalCard, { alignItems: 'center', paddingVertical: Spacing.xxl }]}>
+              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(46, 204, 113, 0.1)', alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md }}>
+                <MaterialCommunityIcons name="check-decagram" size={36} color="#2ECC71" />
+              </View>
+              <Text style={{ ...Typography.heading3, color: Colors.textPrimary, marginBottom: Spacing.sm }}>Entry Saved</Text>
+              <Text style={{ ...Typography.bodyMedium, color: Colors.textMuted, marginBottom: Spacing.xl }}>Grand Total: {formatCurrency(lastOrderTotal)}</Text>
+              
+              <View style={{ width: '100%', gap: Spacing.sm }}>
+                <TouchableOpacity 
+                  style={[styles.modalDoneBtn, { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.gold, marginTop: 0 }]} 
+                  onPress={async () => {
+                    setSuccessModalVisible(false);
+                    clearCart();
+                    if (isStandalone && router.canGoBack()) router.back();
+                    if (lastOrderId) await handleDirectPrint(lastOrderId);
+                  }}
+                >
+                  <Text style={[styles.modalDoneText, { color: Colors.gold }]}>Print Receipt</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[styles.modalDoneBtn, { marginTop: 0 }]} 
+                  onPress={() => {
+                    setSuccessModalVisible(false);
+                    clearCart();
+                    if (isStandalone && router.canGoBack()) router.back();
+                  }}
+                >
+                  <Text style={styles.modalDoneText}>OK</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles() {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   contentWrapper: { flex: 1, width: '100%', alignSelf: 'center' },
   header: {
@@ -415,10 +450,11 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg, borderWidth: 1, borderColor: Colors.border,
   },
   sectionTitle: { ...Typography.heading4, marginBottom: Spacing.md, color: Colors.gold },
-  cartItem: { flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.md },
-  cartItemInfo: { flex: 1 },
-  cartItemName: { ...Typography.bodyMedium, fontSize: 14 },
-  cartItemRate: { ...Typography.caption, marginTop: 2 },
+  cartItem: { flexDirection: 'column', marginBottom: Spacing.md, paddingVertical: 4 },
+  cartItemTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  cartItemBottomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  cartItemName: { ...Typography.bodyMedium, fontSize: 14, flex: 1, marginRight: 8 },
+  cartItemRate: { ...Typography.caption, flex: 1 },
   qtyControls: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: Colors.surface, borderRadius: Radius.full,
@@ -508,7 +544,7 @@ const styles = StyleSheet.create({
   },
   paymentDropdownText: { color: Colors.textInverse, fontFamily: 'Poppins-Medium', fontSize: 13 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: Spacing.xl },
-  modalCard: { backgroundColor: Colors.background, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.light },
+  modalCard: { backgroundColor: Colors.background, borderRadius: Radius.lg, padding: Spacing.lg, ...Shadows.card },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.lg },
   modalTitle: { ...Typography.heading4 },
   modalDoneBtn: { backgroundColor: Colors.gold, borderRadius: Radius.md, paddingVertical: 12, alignItems: 'center', marginTop: Spacing.lg },
@@ -520,4 +556,5 @@ const styles = StyleSheet.create({
   paymentDropdownOptionActive: { borderBottomColor: Colors.gold },
   paymentDropdownOptionText: { ...Typography.bodyMedium, color: Colors.textPrimary },
   paymentDropdownOptionTextActive: { color: Colors.gold },
-});
+  });
+}

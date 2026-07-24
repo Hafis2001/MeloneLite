@@ -58,7 +58,7 @@ export default function CompanySettingsScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={styles.contentWrapper}>
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 16 }}>
+            <TouchableOpacity onPress={() => { if(router.canGoBack()) router.back(); else router.replace('/(tabs)'); }} style={{ marginRight: 16 }}>
               <MaterialCommunityIcons name="arrow-left" size={28} color={Colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Company Settings</Text>
@@ -702,8 +702,8 @@ function createStyles() {
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   dbFileText: {
-    color: Colors.text,
-    fontFamily: Typography.medium,
+    color: Colors.textPrimary,
+    fontFamily: 'Poppins-Medium',
     fontSize: 14,
     flex: 1,
   },

@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, Image, RefreshControl, ScrollView, Platform,
-  useWindowDimensions, Modal, TouchableWithoutFeedback, Animated,
+  useWindowDimensions, Modal, TouchableWithoutFeedback, Animated, Alert,
 } from 'react-native';
 import { useFocusEffect, router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -16,6 +16,7 @@ import { Colors, Spacing, Radius, Typography, Shadows } from '../../src/constant
 import { DualText } from '../../src/components/DualText';
 import { t } from '../../src/utils/translations';
 import { useThemeVersion } from '../../src/context/ThemeContext';
+import { syncOrders } from '../../backgroundSync';
 
 export default function MenuScreen() {
   const themeVersion = useThemeVersion();
@@ -28,6 +29,7 @@ export default function MenuScreen() {
   const [requireBarcode, setRequireBarcode] = useState(false);
   const [addProductByClick, setAddProductByClick] = useState(false);
   const enableMultiplePrices = true;
+  const [syncLoading, setSyncLoading] = useState(false);
 
   // Barcode → quantity modal
   const [barcodeModalItem, setBarcodeModalItem] = useState<Item | null>(null);
@@ -141,10 +143,10 @@ export default function MenuScreen() {
     if (currentQty === 0) {
       addItem(barcodeModalItem);
       if (barcodeQty > 1) {
-        updateQuantity(barcodeModalItem.id, barcodeQty);
+        updateQuantity(`${barcodeModalItem.id}-default`, barcodeQty);
       }
     } else {
-      updateQuantity(barcodeModalItem.id, currentQty + barcodeQty);
+      updateQuantity(`${barcodeModalItem.id}-default`, currentQty + barcodeQty);
     }
     closeBarcodeModal();
   };
@@ -238,7 +240,6 @@ export default function MenuScreen() {
                 malayalamText={item.category_name_ml}
                 tamilText={item.category_name_ta}
                 hindiText={item.category_name_hi}
-                kannadaText={item.category_name_kn}
                 style={[styles.categoryTagText, { color: item.category_color || Colors.gold }]} 
               />
             </View>
@@ -307,12 +308,36 @@ export default function MenuScreen() {
         {/* Header */}
         <View style={[styles.header, isLandscape && isPhone && styles.headerLandscape]}>
           <View>
-            <DualText text="Menu" style={[styles.headerTitle, isLandscape && isPhone && { fontSize: 18 }]} />
+            <Text style={[styles.headerTitle, isLandscape && isPhone && { fontSize: 18 }]}>Menu</Text>
             {!isLandscape && (
               <Text style={styles.headerSub}>{items.length} items available</Text>
             )}
           </View>
           <View style={styles.headerRight}>
+            {/* Test Sync Now button — REMOVE AFTER TESTING */}
+            <TouchableOpacity
+              style={[styles.headerScanBtn, syncLoading && { opacity: 0.6 }]}
+              onPress={async () => {
+                if (syncLoading) return;
+                setSyncLoading(true);
+                try {
+                  await syncOrders();
+                  Alert.alert('Sync', 'Sync completed.');
+                } catch (e) {
+                  Alert.alert('Sync', 'Sync failed silently.');
+                } finally {
+                  setSyncLoading(false);
+                }
+              }}
+              activeOpacity={0.7}
+              disabled={syncLoading}
+            >
+              <MaterialCommunityIcons
+                name={syncLoading ? 'sync' : 'cloud-upload-outline'}
+                size={20}
+                color={Colors.gold}
+              />
+            </TouchableOpacity>
             {/* Barcode Scan Button */}
             {requireBarcode && (
               <TouchableOpacity
@@ -398,22 +423,6 @@ export default function MenuScreen() {
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.gold} />}
             showsVerticalScrollIndicator={false}
           />
-        )}
-
-        {/* Floating Cart Bar */}
-        {cartCount > 0 && (
-          <TouchableOpacity style={styles.cartBar} onPress={() => router.push('/cart')} activeOpacity={0.9}>
-            <View style={styles.cartBarLeft}>
-              <View style={styles.cartCountBubble}>
-                <Text style={styles.cartCountText}>{cartCount}</Text>
-              </View>
-              <DualText text="View Cart" style={styles.cartBarLabel} />
-            </View>
-            <View style={styles.cartBarRight}>
-              <Text style={styles.cartBarTotal}>{formatCurrency(cartSubtotal)}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textInverse} />
-            </View>
-          </TouchableOpacity>
         )}
       </View>
 

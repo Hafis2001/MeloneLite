@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert,
   useWindowDimensions, Vibration,
@@ -8,6 +8,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, Typography } from '../src/constants/theme';
+import { useThemeVersion } from '../src/context/ThemeContext';
 
 /**
  * Barcode Scanner Screen
@@ -20,6 +21,8 @@ import { Colors, Spacing, Radius, Typography } from '../src/constants/theme';
  */
 
 export default function BarcodeScannerScreen() {
+  const themeVersion = useThemeVersion();
+  const styles = useMemo(() => createStyles(), [themeVersion]);
   const { width, height } = useWindowDimensions();
   const isLandscape = width > height;
 
@@ -37,7 +40,7 @@ export default function BarcodeScannerScreen() {
 
     if (mode === 'scan_item') {
       // Return barcode data to item-form
-      router.back();
+      if (router.canGoBack()) { router.back(); } else { router.replace('/(tabs)'); }
       // Use setTimeout to let the navigation settle before passing params
       setTimeout(() => {
         router.setParams({ scannedBarcode: data });
@@ -82,7 +85,7 @@ export default function BarcodeScannerScreen() {
             <MaterialCommunityIcons name="camera" size={18} color={Colors.textInverse} />
             <Text style={styles.permissionBtnText}>Allow Camera</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.cancelBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.cancelBtn} onPress={() => { if(router.canGoBack()) router.back(); else router.replace('/(tabs)'); }}>
             <Text style={styles.cancelBtnText}>Cancel</Text>
           </TouchableOpacity>
         </View>
@@ -139,7 +142,7 @@ export default function BarcodeScannerScreen() {
       {/* Header */}
       <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => { if(router.canGoBack()) router.back(); else router.replace('/(tabs)'); }}>
             <MaterialCommunityIcons name="arrow-left" size={22} color={Colors.white} />
           </TouchableOpacity>
           <View style={{ flex: 1, alignItems: 'center' }}>
@@ -189,7 +192,8 @@ export default function BarcodeScannerScreen() {
 const CORNER_SIZE = 22;
 const CORNER_THICKNESS = 3;
 
-const styles = StyleSheet.create({
+function createStyles() {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   centered: {
     flex: 1, alignItems: 'center', justifyContent: 'center',
@@ -299,4 +303,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md, paddingVertical: 6,
   },
   rescanText: { color: Colors.gold, fontFamily: 'Poppins-Medium', fontSize: 12 },
-});
+  });
+}

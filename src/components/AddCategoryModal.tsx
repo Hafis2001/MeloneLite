@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, StyleSheet, Modal, TouchableOpacity,
   TextInput, KeyboardAvoidingView, Platform, TouchableWithoutFeedback,
@@ -7,6 +7,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { addCategory, updateCategory, Category } from '../db/categoriesDB';
 import { getSetting } from '../db/settingsDB';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../constants/theme';
+import { useThemeVersion } from '../context/ThemeContext';
 
 interface Props {
   visible: boolean;
@@ -17,6 +18,8 @@ interface Props {
 }
 
 export default function AddCategoryModal({ visible, editCategory, availableColors, onClose, onSaved }: Props) {
+  const themeVersion = useThemeVersion();
+  const styles = useMemo(() => createStyles(), [themeVersion]);
   const [name, setName] = useState('');
   const [nameAr, setNameAr] = useState('');
   const [nameMl, setNameMl] = useState('');
@@ -237,7 +240,8 @@ export default function AddCategoryModal({ visible, editCategory, availableColor
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles() {
+  return StyleSheet.create({
   overlay: {
     flex: 1, backgroundColor: Colors.overlayDark,
     alignItems: 'center', justifyContent: 'center', padding: Spacing.lg,
@@ -289,4 +293,5 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.gold, ...Shadows.goldGlow,
   },
   saveText: { color: Colors.textInverse, fontFamily: 'Poppins-SemiBold', fontSize: 14 },
-});
+  });
+}

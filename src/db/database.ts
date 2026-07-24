@@ -92,7 +92,9 @@ export const initDatabase = async (): Promise<void> => {
     'ALTER TABLE categories ADD COLUMN name_hi TEXT;',
     'ALTER TABLE items ADD COLUMN item_name_kn TEXT;',
     'ALTER TABLE categories ADD COLUMN name_kn TEXT;',
-    'ALTER TABLE items ADD COLUMN prices_json TEXT;'
+    'ALTER TABLE items ADD COLUMN prices_json TEXT;',
+    // Background sync: track which orders have been synced to the server
+    'ALTER TABLE orders ADD COLUMN synced INTEGER DEFAULT 0;'
   ];
 
   migrations.forEach(sql => {
@@ -115,6 +117,45 @@ export const initDatabase = async (): Promise<void> => {
       quantity INTEGER NOT NULL DEFAULT 1,
       subtotal REAL NOT NULL,
       FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+    );
+  `);
+
+  // Take Orders table (Pending/Saved)
+  database.execSync(`
+    CREATE TABLE IF NOT EXISTS take_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_number TEXT NOT NULL UNIQUE,
+      customer_name TEXT DEFAULT '',
+      table_no TEXT DEFAULT '',
+      subtotal REAL DEFAULT 0,
+      tax_rate REAL DEFAULT 5,
+      tax_amount REAL DEFAULT 0,
+      discount REAL DEFAULT 0,
+      grand_total REAL DEFAULT 0,
+      payment_method TEXT DEFAULT 'Cash',
+      status TEXT DEFAULT 'pending',
+      notes TEXT DEFAULT '',
+      print_count INTEGER DEFAULT 0,
+      cash_amount REAL DEFAULT 0,
+      upi_amount REAL DEFAULT 0,
+      is_split_payment INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      saved_at TEXT
+    );
+  `);
+
+  // Take Order items table
+  database.execSync(`
+    CREATE TABLE IF NOT EXISTS take_order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      item_id INTEGER,
+      item_code TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      rate REAL NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      subtotal REAL NOT NULL,
+      FOREIGN KEY (order_id) REFERENCES take_orders(id) ON DELETE CASCADE
     );
   `);
 

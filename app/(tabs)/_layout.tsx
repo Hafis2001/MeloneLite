@@ -175,7 +175,6 @@ export default function TabsLayout() {
       <Tabs
       screenOptions={{
         headerShown: false,
-        detachInactiveScreens: Platform.OS === 'ios',
         tabBarStyle: [
           styles.tabBar, 
           { 
@@ -218,6 +217,16 @@ export default function TabsLayout() {
             <DualText text="Categories" style={[styles.tabLabel, { color }]} />
           ),
           tabBarIcon: ({ focused }) => <TabIcon name="tag-multiple" focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
+        name="take-order"
+        options={{
+          title: 'Take Order',
+          tabBarLabel: ({ color }) => (
+            <DualText text="Take Order" style={[styles.tabLabel, { color }]} />
+          ),
+          tabBarIcon: ({ focused }) => <TabIcon name="clipboard-text" focused={focused} />,
         }}
       />
       <Tabs.Screen

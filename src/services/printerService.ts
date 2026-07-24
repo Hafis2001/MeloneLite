@@ -165,7 +165,7 @@ class PrinterService {
       console.log("PrinterService: Initialization successful");
       return true;
     } catch (e) {
-      console.error("PrinterService: Initialization failed", e);
+      console.warn("PrinterService: Initialization failed", e);
       // If it's a real device and it fails here, show the instructions
       if (isNativeModuleAvailable) {
         Alert.alert(
@@ -185,7 +185,7 @@ class PrinterService {
     
     const initialized = await this.init();
     if (!initialized) {
-      console.error("PrinterService: Cannot get devices, init failed");
+      console.warn("PrinterService: Cannot get devices, init failed");
       return [];
     }
     
@@ -209,7 +209,7 @@ class PrinterService {
       }
       return devices || [];
     } catch (e) {
-      console.error("PrinterService: Failed to get device list", e);
+      console.warn("PrinterService: Failed to get device list", e);
       return [];
     }
   }
@@ -227,7 +227,7 @@ class PrinterService {
     }
   }
 
-  async printOrder(order: Order, items: OrderItem[], settings: Settings) {
+  async printOrder(order: Order, items: OrderItem[], settings: Settings, isTakeOrder: boolean = false) {
     if (!this.connected) {
       if (this.currentPrinter) {
         const reconnected = await this.connect(this.currentPrinter);
@@ -334,11 +334,21 @@ class PrinterService {
     const formattedDate = order.created_at ? new Date(order.created_at.replace(' ', 'T')).toLocaleString() : new Date().toLocaleString();
     receipt += `Date: ${formattedDate}\n`;
     if (order.table_no) receipt += `Table: ${order.table_no}\n`;
+    if (order.customer_name) receipt += `Customer: ${order.customer_name}\n`;
+    if (order.notes) receipt += `Remark: ${order.notes}\n`;
     receipt += "-".repeat(width) + "\n";
 
     // Items Header
-    receipt += formatThreeColumns("Item", "Qty", "Amt");
+    if (isTakeOrder) {
+      receipt += formatThreeColumns("Item", "Qty", "");
+    } else {
+      receipt += formatThreeColumns("Item", "Qty", "Amt");
+    }
     receipt += "-".repeat(width) + "\n";
+
+    const sanitize = (text: string) => {
+      return text.replace(/—/g, '-').replace(/–/g, '-').replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/[^\x00-\x7F]/g, '');
+    };
 
     items.forEach(item => {
       try {
@@ -346,22 +356,28 @@ class PrinterService {
         const subtotal = Number(item.subtotal || 0);
         const amtStr = subtotal.toFixed(safeDecimals);
         const qtyStr = qty.toString();
-        const name = item.item_name || 'Item';
+        const name = sanitize(item.item_name || 'Item');
         
-        receipt += formatThreeColumns(name, qtyStr, amtStr);
+        if (isTakeOrder) {
+          receipt += formatThreeColumns(name, qtyStr, "");
+        } else {
+          receipt += formatThreeColumns(name, qtyStr, amtStr);
+        }
       } catch (err) {
         console.warn("Error formatting item line", err);
       }
     });
 
     receipt += "-".repeat(width) + "\n";
-    receipt += leftRight("Subtotal", Number(order.subtotal || 0).toFixed(safeDecimals));
-    if (order.discount > 0) receipt += leftRight("Discount", `-${Number(order.discount || 0).toFixed(safeDecimals)}`);
-    receipt += "\x1B\x45\x01"; // Bold On
-    receipt += leftRight("TOTAL", Number(order.grand_total || 0).toFixed(safeDecimals));
-    receipt += "\x1B\x45\x00"; // Bold Off
     
-    receipt += "-".repeat(width) + "\n";
+    if (!isTakeOrder) {
+      receipt += leftRight("Subtotal", Number(order.subtotal || 0).toFixed(safeDecimals));
+      if (order.discount > 0) receipt += leftRight("Discount", `-${Number(order.discount || 0).toFixed(safeDecimals)}`);
+      receipt += "\x1B\x45\x01"; // Bold On
+      receipt += leftRight("TOTAL", Number(order.grand_total || 0).toFixed(safeDecimals));
+      receipt += "\x1B\x45\x00"; // Bold Off
+      receipt += "-".repeat(width) + "\n";
+    }
     
     receipt += center(settings.receipt_footer || "Thank you!");
     receipt += "\n\n\n"; // Feed
@@ -382,7 +398,7 @@ class PrinterService {
       }
       return true;
     } catch (e) {
-      console.error("Print Error during printing:", e);
+      console.warn("Print Error during printing:", e);
       Alert.alert("Print Error", "Failed to send data to printer. Make sure you are using a Development Build, not Expo Go.");
       return false;
     }

@@ -94,6 +94,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
       return { ...state, tableNo: action.tableNo };
     case 'SET_PAYMENT':
       return { ...state, paymentMethod: action.method };
+    case 'SET_NOTES':
+      return { ...state, notes: action.notes };
     case 'SET_DISCOUNT':
       return { ...state, discount: action.discount };
     case 'SET_SPLIT_PAYMENT':

@@ -199,7 +199,7 @@ export default function LanguageSettingsScreen() {
 
           {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <TouchableOpacity onPress={() => { if(router.canGoBack()) router.back(); else router.replace('/(tabs)'); }} style={styles.backBtn}>
               <MaterialCommunityIcons name="arrow-left" size={28} color={Colors.textPrimary} />
             </TouchableOpacity>
             <View style={{ flex: 1 }}>

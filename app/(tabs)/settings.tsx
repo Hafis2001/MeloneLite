@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useWindowDimensions, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,6 +13,22 @@ export default function SettingsMenuScreen() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const isLandscape = width > height;
+
+  const handleLogout = () => {
+    Alert.alert('Logout', 'Are you sure you want to log out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: async () => {
+          await AsyncStorage.removeItem('staff_id');
+          await AsyncStorage.removeItem('staff_name');
+          await AsyncStorage.removeItem('staff_skipped');
+          router.replace('/staff-login');
+        },
+      },
+    ]);
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -50,6 +67,17 @@ export default function SettingsMenuScreen() {
             <View style={styles.menuTextContainer}>
               <Text style={styles.menuTitle}>About Us</Text>
               <Text style={styles.menuDesc}>Contact details, license information</Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={24} color={Colors.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.menuCard, styles.logoutCard]} onPress={handleLogout}>
+            <View style={[styles.menuIconContainer, styles.logoutIconContainer]}>
+              <MaterialCommunityIcons name="logout" size={32} color={Colors.error || '#ef4444'} />
+            </View>
+            <View style={styles.menuTextContainer}>
+              <Text style={[styles.menuTitle, { color: Colors.error || '#ef4444' }]}>Log Out</Text>
+              <Text style={styles.menuDesc}>Sign out of your account</Text>
             </View>
             <MaterialCommunityIcons name="chevron-right" size={24} color={Colors.textMuted} />
           </TouchableOpacity>
@@ -99,6 +127,13 @@ function createStyles() {
   menuDesc: {
     ...Typography.caption,
     color: Colors.textMuted,
+  },
+  logoutCard: {
+    marginTop: Spacing.xl,
+    borderColor: (Colors.error || '#ef4444') + '40',
+  },
+  logoutIconContainer: {
+    backgroundColor: (Colors.error || '#ef4444') + '15',
   },
   });
 }

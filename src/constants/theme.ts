@@ -36,6 +36,7 @@ export const Colors = {
 
   overlayDark: 'rgba(0,0,0,0.7)',
   overlayLight: 'rgba(255,255,255,0.05)',
+  goldOverlay: 'rgba(212,168,83,0.1)',
   goldOverlayStrong: 'rgba(212,168,83,0.2)',
 };
 
@@ -138,6 +139,10 @@ export const Typography = {
   price: { fontSize: 16, fontFamily: 'Poppins-Bold', color: Colors.gold },
   priceSmall: { fontSize: 13, fontFamily: 'Poppins-SemiBold', color: Colors.gold },
   label: { fontSize: 11, fontFamily: 'Poppins-Medium', color: Colors.textMuted, textTransform: 'uppercase' as const, letterSpacing: 1 },
+  text: { fontSize: 14, fontFamily: 'Poppins-Regular', color: Colors.textPrimary },
+  regular: { fontSize: 14, fontFamily: 'Poppins-Regular', color: Colors.textPrimary },
+  medium: { fontSize: 14, fontFamily: 'Poppins-Medium', color: Colors.textPrimary },
+  semiBold: { fontSize: 14, fontFamily: 'Poppins-SemiBold', color: Colors.textPrimary },
 };
 
 export const Spacing = {

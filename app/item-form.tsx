@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, Image, KeyboardAvoidingView, Platform,
@@ -16,7 +16,11 @@ import { Colors, Spacing, Radius, Typography, Shadows } from '../src/constants/t
 import { generateAIImage } from '../src/services/aiService';
 import { getSetting } from '../src/db/settingsDB';
 
+import { useThemeVersion } from '../src/context/ThemeContext';
+
 export default function ItemFormScreen() {
+  const themeVersion = useThemeVersion();
+  const styles = useMemo(() => createStyles(), [themeVersion]);
   const params = useLocalSearchParams<{ id?: string; scannedBarcode?: string }>();
   const { id } = params;
   const isEdit = !!id;
@@ -237,7 +241,7 @@ export default function ItemFormScreen() {
         addItem(itemCode, itemName, itemNameAr, itemNameMl, itemNameTa, itemNameHi, itemNameKn, rateNum, categoryId, finalImageUri, barcode, pricesJson);
       }
 
-      router.back();
+      if (router.canGoBack()) { router.back(); } else { router.replace('/(tabs)'); }
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Could not save item');
     } finally {
@@ -252,7 +256,7 @@ export default function ItemFormScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={styles.contentWrapper}>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <TouchableOpacity style={styles.backBtn} onPress={() => { if(router.canGoBack()) router.back(); else router.replace('/(tabs)'); }}>
               <MaterialCommunityIcons name="arrow-left" size={24} color={Colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>{isEdit ? 'Edit Item' : 'New Item'}</Text>
@@ -405,6 +409,8 @@ function FormFields({
   categoryId, setCategoryId, categories,
   categoryDropdown, setCategoryDropdown, selectedCategory,
 }: any) {
+  const themeVersion = useThemeVersion();
+  const styles = useMemo(() => createStyles(), [themeVersion]);
   return (
     <View style={styles.formCard}>
       <Text style={styles.label}>Item Code *</Text>
@@ -594,7 +600,8 @@ function FormFields({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles() {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   contentWrapper: { flex: 1, maxWidth: 800, width: '100%', alignSelf: 'center' },
   header: {
@@ -727,3 +734,4 @@ const styles = StyleSheet.create({
   },
   modalCancelText: { fontFamily: 'Poppins-SemiBold', fontSize: 14, color: Colors.textMuted },
 });
+}

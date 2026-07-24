@@ -62,7 +62,7 @@ export default function ThemeSettingsScreen() {
     refreshTheme();
 
     // Navigate back — theme is already live
-    router.back();
+    if (router.canGoBack()) { router.back(); } else { router.replace('/(tabs)'); }
   };
 
   return (
@@ -70,7 +70,7 @@ export default function ThemeSettingsScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={styles.contentWrapper}>
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 16 }}>
+            <TouchableOpacity onPress={() => { if(router.canGoBack()) router.back(); else router.replace('/(tabs)'); }} style={{ marginRight: 16 }}>
               <MaterialCommunityIcons name="arrow-left" size={28} color={Colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>App Theme</Text>

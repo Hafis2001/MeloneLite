@@ -2,7 +2,7 @@
   "expo": {
     "name": "MeloneLite",
     "slug": "MeloneLite",
-    "version": "2.2.1",
+    "version": "2.2.2",
     "orientation": "default",
     "icon": "./assets/appnew.png",
     "userInterfaceStyle": "dark",
@@ -28,7 +28,8 @@
         "backgroundColor": "#FFFFFF"
       },
       "package": "com.melonelite.restaurant",
-      "versionCode": 4,
+      "usesCleartextTraffic": true,
+      "versionCode": 5,
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
@@ -77,6 +78,14 @@
         {
           "photosPermission": "Allow MeloneLite to access your photos for item images.",
           "cameraPermission": "Allow MeloneLite to use camera to capture item images."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
         }
       ]
     ],

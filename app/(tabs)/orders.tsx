@@ -10,17 +10,20 @@ import { Calendar } from 'react-native-calendars';
 import { getAllOrders, getOrderById, deleteOrder, getOrderStats, Order, incrementPrintCount, getAdvancedReportStats, getTopMovedItems, AdvancedStats } from '../../src/db/ordersDB';
 import { getAllSettings } from '../../src/db/settingsDB';
 import { printReceipt, sharePDF, shareReportPDF } from '../../src/utils/printUtils';
+import { getTakeOrderAdvancedReportStats, getTakeOrderTopMovedItems } from '../../src/db/takeOrdersDB';
 import { formatCurrency } from '../../src/utils/currencyUtils';
 import printerService from '../../src/services/printerService';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../../src/constants/theme';
 import { DualText } from '../../src/components/DualText';
 import { t } from '../../src/utils/translations';
 import { useThemeVersion, useActiveLanguage } from '../../src/context/ThemeContext';
+import { TakeOrdersReport } from '../../src/components/TakeOrdersReport';
 
 export default function OrdersScreen() {
   const themeVersion = useThemeVersion();
   const lang = useActiveLanguage();
   const styles = useMemo(() => createStyles(), [themeVersion]);
+  const [mainTab, setMainTab] = useState<'Sales' | 'Orders'>('Sales');
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState({ total_orders: 0, total_revenue: 0, today_orders: 0, today_revenue: 0 });
@@ -62,14 +65,19 @@ export default function OrdersScreen() {
       eDate = lastDay.toISOString().split('T')[0];
     }
     
-    setAdvancedStats(getAdvancedReportStats(sDate, eDate));
-    setTopItems(getTopMovedItems(20, sDate, eDate));
-  }, [reportType, advancedFilterDate]);
+    if (mainTab === 'Orders') {
+      setAdvancedStats(getTakeOrderAdvancedReportStats(sDate, eDate));
+      setTopItems(getTakeOrderTopMovedItems(20, sDate, eDate));
+    } else {
+      setAdvancedStats(getAdvancedReportStats(sDate, eDate));
+      setTopItems(getTopMovedItems(20, sDate, eDate));
+    }
+  }, [reportType, advancedFilterDate, mainTab]);
 
   // Hook to reload when opened or changed
   useFocusEffect(useCallback(() => {
     if (showAdvanced) loadAdvancedReports();
-  }, [showAdvanced, reportType, advancedFilterDate, loadAdvancedReports]));
+  }, [showAdvanced, reportType, advancedFilterDate, mainTab, loadAdvancedReports]));
 
   const loadOrders = useCallback(() => {
     setAllOrders(getAllOrders());
@@ -344,7 +352,14 @@ export default function OrdersScreen() {
       <View style={[styles.contentWrapper, isLandscapePhone && { paddingHorizontal: Spacing.xl }]}>
         {/* Header */}
       <View style={[styles.header, isLandscapePhone && styles.headerLandscape]}>
-        <DualText text="Orders" style={styles.headerTitle} />
+        <View style={styles.mainTabs}>
+          <TouchableOpacity style={[styles.mainTab, mainTab === 'Sales' && styles.mainTabActive]} onPress={() => setMainTab('Sales')}>
+            <DualText text="Sales" style={[styles.mainTabText, mainTab === 'Sales' && styles.mainTabTextActive]} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.mainTab, mainTab === 'Orders' && styles.mainTabActive]} onPress={() => setMainTab('Orders')}>
+            <DualText text="Orders" style={[styles.mainTabText, mainTab === 'Orders' && styles.mainTabTextActive]} />
+          </TouchableOpacity>
+        </View>
         <TouchableOpacity 
           style={styles.detailedReportsBtn} 
           onPress={() => { setShowAdvanced(true); loadAdvancedReports(); }}
@@ -353,6 +368,12 @@ export default function OrdersScreen() {
           <DualText text="DETAILED REPORT" style={styles.detailedReportsText} />
         </TouchableOpacity>
       </View>
+
+      {mainTab === 'Orders' ? (
+        <TakeOrdersReport />
+      ) : (
+        <>
+
 
       {/* Date Filter */}
       <View style={styles.dateFilterContainer}>
@@ -434,7 +455,157 @@ export default function OrdersScreen() {
           showsVerticalScrollIndicator={false}
         />
       )}
-      {/* Advanced Reports Modal */}
+        </>
+      )}
+
+      <Modal visible={showAdvanced} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={styles.modalContainer} edges={['top']}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Detailed Reports</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <TouchableOpacity onPress={handleShareReport} style={styles.headerPdfBtn}>
+                <MaterialCommunityIcons name="file-pdf-box" size={18} color={Colors.gold} />
+                <Text style={styles.pdfBtnText}>Share PDF</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowAdvanced(false)} style={styles.closeBtn}>
+                <MaterialCommunityIcons name="close" size={24} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+            <View style={styles.reportTypeTabs}>
+            <TouchableOpacity 
+              style={[styles.reportTab, reportType === 'today' && styles.reportTabActive]}
+              onPress={() => setReportType('today')}
+            >
+              <Text style={[styles.reportTabText, reportType === 'today' && styles.reportTabTextActive]}>Today</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.reportTab, reportType === 'date-wise' && styles.reportTabActive]}
+              onPress={() => setReportType('date-wise')}
+            >
+              <Text style={[styles.reportTabText, reportType === 'date-wise' && styles.reportTabTextActive]}>Selected Date</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.reportTab, reportType === 'monthly' && styles.reportTabActive]}
+              onPress={() => setReportType('monthly')}
+            >
+              <Text style={[styles.reportTabText, reportType === 'monthly' && styles.reportTabTextActive]}>This Month</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.reportTab, reportType === 'overall' && styles.reportTabActive]}
+              onPress={() => setReportType('overall')}
+            >
+              <Text style={[styles.reportTabText, reportType === 'overall' && styles.reportTabTextActive]}>All Time</Text>
+            </TouchableOpacity>
+          </View>
+
+          {reportType === 'date-wise' && (
+            <View style={[styles.dateFilterContainer, { paddingHorizontal: Spacing.lg, marginTop: Spacing.sm }]}>
+              <TouchableOpacity 
+                style={[styles.dateCenterBtn, { flex: 1, justifyContent: 'center' }]} 
+                onPress={() => setShowAdvancedCalendar(true)}
+              >
+                <MaterialCommunityIcons name="calendar-month" size={18} color={Colors.gold} />
+                <Text style={styles.dateText}>
+                  {advancedFilterDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </Text>
+                <MaterialCommunityIcons name="chevron-down" size={16} color={Colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <Modal visible={showAdvancedCalendar} transparent animationType="fade">
+            <TouchableWithoutFeedback onPress={() => setShowAdvancedCalendar(false)}>
+              <View style={styles.modalOverlay}>
+                <TouchableWithoutFeedback>
+                  <View style={styles.calendarContainer}>
+                    <Calendar
+                      current={`${advancedFilterDate.getFullYear()}-${String(advancedFilterDate.getMonth() + 1).padStart(2, '0')}-${String(advancedFilterDate.getDate()).padStart(2, '0')}`}
+                      onDayPress={(day: any) => {
+                        setAdvancedFilterDate(new Date(day.timestamp));
+                        setShowAdvancedCalendar(false);
+                      }}
+                      maxDate={new Date().toISOString().split('T')[0]}
+                      theme={{
+                        todayTextColor: Colors.gold,
+                        selectedDayBackgroundColor: Colors.gold,
+                        selectedDayTextColor: Colors.white,
+                        arrowColor: Colors.gold,
+                      }}
+                      markedDates={{
+                        [`${advancedFilterDate.getFullYear()}-${String(advancedFilterDate.getMonth() + 1).padStart(2, '0')}-${String(advancedFilterDate.getDate()).padStart(2, '0')}`]: { selected: true, selectedColor: Colors.gold }
+                      }}
+                    />
+                  </View>
+                </TouchableWithoutFeedback>
+              </View>
+            </TouchableWithoutFeedback>
+          </Modal>
+
+          {advancedStats && (
+            <FlatList
+              data={topItems}
+              keyExtractor={(item, index) => `${item.item_name}-${index}`}
+              ListHeaderComponent={
+                <View style={styles.advancedStatsContainer}>
+                  <Text style={styles.sectionTitle}>Key Metrics</Text>
+                  <View style={styles.statsRow}>
+                    <View style={styles.statCard}>
+                      <Text style={styles.statValue}>{advancedStats.totalBills}</Text>
+                      <Text style={styles.statLabel}>Total Bills</Text>
+                    </View>
+                    <View style={[styles.statCard, styles.statCardMiddle]}>
+                      <Text style={[styles.statValue, { color: Colors.gold }]}>{formatCurrency(advancedStats.totalRevenue)}</Text>
+                      <Text style={styles.statLabel}>Total Revenue</Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.sectionTitle}>Payment Breakdown</Text>
+                  <View style={styles.statsRow}>
+                    <View style={styles.statCard}>
+                      <Text style={[styles.statValue, { color: Colors.success, fontSize: 16 }]}>{formatCurrency(advancedStats.cashRevenue)}</Text>
+                      <Text style={styles.statLabel}>Cash</Text>
+                    </View>
+                    <View style={[styles.statCard, styles.statCardMiddle]}>
+                      <Text style={[styles.statValue, { color: Colors.info, fontSize: 16 }]}>{formatCurrency(advancedStats.upiRevenue)}</Text>
+                      <Text style={styles.statLabel}>UPI</Text>
+                    </View>
+                    <View style={styles.statCard}>
+                      <Text style={[styles.statValue, { color: Colors.gold, fontSize: 16 }]}>{formatCurrency(advancedStats.cardRevenue)}</Text>
+                      <Text style={styles.statLabel}>Card</Text>
+                    </View>
+                  </View>
+
+                  <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>Top Moved Items</Text>
+                  {topItems.length === 0 && (
+                    <Text style={styles.emptySubtitle}>No items sold in this period.</Text>
+                  )}
+                </View>
+              }
+              renderItem={({ item, index }) => (
+                <View style={styles.topItemRow}>
+                  <View style={styles.topItemRank}>
+                    <Text style={styles.topItemRankText}>{index + 1}</Text>
+                  </View>
+                  <View style={styles.topItemInfo}>
+                    <Text style={styles.topItemName}>{item.item_name}</Text>
+                    <Text style={styles.topItemRevenue}>{formatCurrency(item.total_revenue)}</Text>
+                  </View>
+                  <View style={styles.topItemQtyBadge}>
+                    <Text style={styles.topItemQtyText}>{item.total_quantity} sold</Text>
+                  </View>
+                </View>
+              )}
+              contentContainerStyle={{ paddingBottom: Spacing.xxxl }}
+              showsVerticalScrollIndicator={false}
+              scrollEnabled={false}
+            />
+          )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
       <Modal visible={showAdvanced} animationType="slide" presentationStyle="pageSheet">
         <SafeAreaView style={styles.modalContainer} edges={['top']}>
           <View style={styles.modalHeader}>
@@ -598,6 +769,15 @@ function createStyles() {
   },
   headerLandscape: { paddingVertical: Spacing.sm },
   headerTitle: { ...Typography.heading2 },
+  mainTabs: { flexDirection: 'row', gap: Spacing.sm },
+  mainTab: {
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs,
+    borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.card,
+  },
+  mainTabActive: { backgroundColor: Colors.gold, borderColor: Colors.gold },
+  mainTabText: { ...Typography.bodyMedium, color: Colors.textPrimary },
+  mainTabTextActive: { color: Colors.textInverse },
   dateFilterContainer: {
     flexDirection: 'row',
     alignItems: 'center',

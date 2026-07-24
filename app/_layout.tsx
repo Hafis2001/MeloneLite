@@ -10,6 +10,7 @@ import * as Linking from 'expo-linking';
 import { useFonts } from 'expo-font';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { CartProvider } from '../src/context/CartContext';
+import { TakeOrderCartProvider } from '../src/context/TakeOrderCartContext';
 import { initDatabase } from '../src/db/database';
 import { getSetting } from '../src/db/settingsDB';
 import { Colors, applyTheme } from '../src/constants/theme';
@@ -18,11 +19,15 @@ import { generateAIImage } from '../src/services/aiService';
 import { getDB } from '../src/db/database';
 import * as FileSystem from 'expo-file-system/legacy';
 import CartScreen from './cart';
+import TakeOrderCartScreen from './take-order-cart';
+import { initBackgroundSync } from '../backgroundSync';
+import '../HeadlessTask';
 
 export default function RootLayout() {
   const [dbReady, setDbReady] = useState(false);
   const [dbError, setDbError] = useState<string | null>(null);
   const [isLicensed, setIsLicensed] = useState<boolean | null>(null);
+  const [isStaffLoggedIn, setIsStaffLoggedIn] = useState<boolean | null>(null);
   const [themeVersion, setThemeVersion] = useState(0);
   const segments = useSegments();
   const router = useRouter();
@@ -31,7 +36,8 @@ export default function RootLayout() {
   const isLandscape = width > height;
   const isTablet = width >= 768;
   const isMenuPage = segments.length > 0 && segments[0] === '(tabs)' && (segments.length === 1 || (segments as string[])[1] === 'index');
-  const showSideCart = isTablet && isMenuPage;
+  const isTakeOrderPage = segments.length > 0 && segments[0] === '(tabs)' && (segments as string[])[1] === 'take-order';
+  const showSideCart = isTablet && (isMenuPage || isTakeOrderPage);
 
   const [fontsLoaded] = useFonts({
     'Poppins-Regular': require('../assets/fonts/Poppins-Regular.ttf'),
@@ -64,12 +70,25 @@ export default function RootLayout() {
             // Demo expired — revoke access and force license screen
             await AsyncStorage.setItem('licenseActivated', 'false');
             setIsLicensed(false);
+            setIsStaffLoggedIn(false);
             setDbReady(true);
             return;
           }
         }
 
         setIsLicensed(licensed === 'true');
+
+        // Staff login gate only applies to real (non-demo) licenses
+        if (licenseType === 'demo') {
+          // Demo license — bypass staff login, let normal flow continue
+          setIsStaffLoggedIn(true);
+        } else {
+          // Real license — check if staff is already logged in on this device
+          const staffId = await AsyncStorage.getItem('staff_id');
+          const skipped = await AsyncStorage.getItem('staff_skipped');
+          setIsStaffLoggedIn(!!staffId && staffId.trim() !== '' || skipped === 'true');
+        }
+
         setDbReady(true);
       } catch (e: any) {
         setDbError(e?.message ?? 'Database error');
@@ -86,32 +105,96 @@ export default function RootLayout() {
       const isCurrentlyLicensed = licensed === 'true';
       setIsLicensed(isCurrentlyLicensed);
 
+      const licenseType = await AsyncStorage.getItem('license_type');
+      const isDemo = licenseType === 'demo';
+
       const inAuthGroup = segments[0] === 'license';
       const inOnboarding = segments[0] === 'onboarding';
+      const inStaffLogin = segments[0] === 'staff-login';
 
       if (!isCurrentlyLicensed && !inAuthGroup) {
         router.replace('/license');
       } else if (isCurrentlyLicensed && inAuthGroup) {
-        // Check if this is the very first login — show onboarding
+        if (!isDemo) {
+          // Real license — check staff login first
+          const staffId = await AsyncStorage.getItem('staff_id');
+          const skipped = await AsyncStorage.getItem('staff_skipped');
+          const staffLoggedIn = !!staffId && staffId.trim() !== '' || skipped === 'true';
+          setIsStaffLoggedIn(staffLoggedIn);
+          if (!staffLoggedIn) {
+            router.replace('/staff-login');
+            return;
+          }
+        } else {
+          // Demo license — skip staff login gate
+          setIsStaffLoggedIn(true);
+        }
+        // Check onboarding
         const onboardingDone = await AsyncStorage.getItem('onboarding_complete');
         if (!onboardingDone) {
           router.replace('/onboarding');
         } else {
           router.replace('/(tabs)');
         }
-      } else if (isCurrentlyLicensed && !inOnboarding) {
-        // If already licensed and navigating normally, ensure onboarding is not missed
-        const onboardingDone = await AsyncStorage.getItem('onboarding_complete');
-        if (!onboardingDone && segments[0] !== 'onboarding') {
-          // Only redirect if not already in tabs (to avoid redirect loops)
-          if (segments[0] === '(tabs)' || segments.length === 0) {
+      } else if (isCurrentlyLicensed && inStaffLogin) {
+        // Already on staff-login — only reachable on real license
+        const staffId = await AsyncStorage.getItem('staff_id');
+        const skipped = await AsyncStorage.getItem('staff_skipped');
+        const staffLoggedIn = !!staffId && staffId.trim() !== '' || skipped === 'true';
+        setIsStaffLoggedIn(staffLoggedIn);
+        if (staffLoggedIn) {
+          const onboardingDone = await AsyncStorage.getItem('onboarding_complete');
+          if (!onboardingDone) {
             router.replace('/onboarding');
+          } else {
+            router.replace('/(tabs)');
+          }
+        }
+      } else if (isCurrentlyLicensed && !inOnboarding && !inStaffLogin) {
+        // Licensed and navigating normally
+        if (!isDemo) {
+          // Real license — enforce staff login gate
+          const staffId = await AsyncStorage.getItem('staff_id');
+          const skipped = await AsyncStorage.getItem('staff_skipped');
+          const staffLoggedIn = !!staffId && staffId.trim() !== '' || skipped === 'true';
+          setIsStaffLoggedIn(staffLoggedIn);
+          if (!staffLoggedIn && segments[0] !== 'staff-login') {
+            router.replace('/staff-login');
+            return;
+          }
+          // Ensure onboarding is not missed
+          if (staffLoggedIn) {
+            const onboardingDone = await AsyncStorage.getItem('onboarding_complete');
+            if (!onboardingDone && segments[0] !== 'onboarding') {
+              if (segments[0] === '(tabs)' || segments.length === 0) {
+                router.replace('/onboarding');
+              }
+            }
+          }
+        } else {
+          // Demo license — skip staff login gate entirely
+          setIsStaffLoggedIn(true);
+          // Ensure onboarding is not missed
+          const onboardingDone = await AsyncStorage.getItem('onboarding_complete');
+          if (!onboardingDone && segments[0] !== 'onboarding') {
+            if (segments[0] === '(tabs)' || segments.length === 0) {
+              router.replace('/onboarding');
+            }
           }
         }
       }
     };
     checkAuth();
   }, [segments, fontsLoaded, dbReady]);
+
+  // Initialize background sync on mount
+  useEffect(() => {
+    try {
+      initBackgroundSync();
+    } catch (e) {
+      // Silently ignore — background sync setup failure must never crash the app
+    }
+  }, []);
 
   // Background Image Generator for DB Restores
   useEffect(() => {
@@ -184,7 +267,7 @@ export default function RootLayout() {
     };
   }, [router, dbReady, isLicensed]);
 
-  if (!fontsLoaded || !dbReady || isLicensed === null) {
+  if (!fontsLoaded || !dbReady || isLicensed === null || isStaffLoggedIn === null) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={Colors.gold} />
@@ -208,13 +291,22 @@ export default function RootLayout() {
     <ThemeContext.Provider value={{ refreshTheme, themeVersion }}>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <CartProvider>
-          <StatusBar key={`status-${themeVersion}`} style="light" backgroundColor={Colors.background} />
+          <TakeOrderCartProvider>
+            <StatusBar key={`status-${themeVersion}`} style="light" backgroundColor={Colors.background} />
           <View style={{ flex: 1, flexDirection: 'row', backgroundColor: Colors.background }}>
             <View style={{ flex: 1 }}>
             <Stack screenOptions={{ headerShown: false, animation: Platform.OS === 'android' ? 'fade' : 'default', detachInactiveScreens: Platform.OS === 'ios' }}>
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen
                 name="cart"
+                options={{
+                  headerShown: false,
+                  presentation: 'modal',
+                  animation: Platform.OS === 'android' ? 'fade' : 'slide_from_bottom',
+                }}
+              />
+              <Stack.Screen
+                name="take-order-cart"
                 options={{
                   headerShown: false,
                   presentation: 'modal',
@@ -255,6 +347,14 @@ export default function RootLayout() {
                 }} 
               />
               <Stack.Screen
+                name="staff-login"
+                options={{
+                  headerShown: false,
+                  gestureEnabled: false,
+                  animation: 'fade',
+                }}
+              />
+              <Stack.Screen
                 name="onboarding"
                 options={{
                   headerShown: false,
@@ -266,12 +366,13 @@ export default function RootLayout() {
           </View>
           {showSideCart && (
             <View style={{ width: 320, borderLeftWidth: 1, borderColor: Colors.border, backgroundColor: Colors.background }}>
-              <CartScreen />
+              {isTakeOrderPage ? <TakeOrderCartScreen /> : <CartScreen />}
             </View>
           )}
-        </View>
-      </CartProvider>
-    </GestureHandlerRootView>
+          </View>
+          </TakeOrderCartProvider>
+        </CartProvider>
+      </GestureHandlerRootView>
     </ThemeContext.Provider>
   );
 }

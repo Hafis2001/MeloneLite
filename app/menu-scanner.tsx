@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   Alert, Image, ActivityIndicator, FlatList, Modal,
@@ -15,6 +15,7 @@ import {
 import { getAllCategories, addCategory } from '../src/db/categoriesDB';
 import { generateAIImage } from '../src/services/aiService';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../src/constants/theme';
+import { useThemeVersion } from '../src/context/ThemeContext';
 
 type Step = 'capture' | 'processing' | 'review' | 'importing';
 
@@ -34,6 +35,8 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const { width: SW } = Dimensions.get('window');
 
 export default function MenuScannerScreen() {
+  const themeVersion = useThemeVersion();
+  const styles = useMemo(() => createStyles(), [themeVersion]);
   const [step, setStep] = useState<Step>('capture');
   const [pages, setPages] = useState<Page[]>([]);
   const [items, setItems] = useState<ScannedItem[]>([]);
@@ -318,7 +321,7 @@ ${truncatedText}`;
 
         const price = parseFloat(it.price) || 0;
         const catId = catMap[it.category?.trim()] ?? null;
-        const savedId = addItem(code, it.name.trim(), null, null, null, null, price, catId, null);
+        const savedId = addItem(code, it.name.trim(), null, null, null, null, null, price, catId, null, null, null);
         // background AI image
         const catName = it.category || '';
         ; (async () => {
@@ -326,7 +329,7 @@ ${truncatedText}`;
             const url = await generateAIImage(it.name.trim(), catName);
             if (url) {
               const saved = getItemById(savedId);
-              dbUpdateItem(savedId, code, it.name.trim(), null, null, null, null, price, catId, url, saved?.is_available ?? 1);
+              dbUpdateItem(savedId, code, it.name.trim(), null, null, null, null, null, price, catId, url, saved?.is_available ?? 1, null, null);
             }
           } catch (_) { }
         })();
@@ -378,7 +381,7 @@ ${truncatedText}`;
                 </View>
                 <Text style={styles.procTitle}>Import Complete!</Text>
                 <Text style={styles.procMsg}>{importTotal} items added to your menu</Text>
-                <TouchableOpacity style={styles.doneBtn} onPress={() => router.back()}>
+                <TouchableOpacity style={styles.doneBtn} onPress={() => { if(router.canGoBack()) router.back(); else router.replace('/(tabs)'); }}>
                   <Text style={styles.doneBtnText}>Go to Items →</Text>
                 </TouchableOpacity>
               </>
@@ -534,7 +537,7 @@ ${truncatedText}`;
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.contentWrapper}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => { if(router.canGoBack()) router.back(); else router.replace('/(tabs)'); }}>
             <MaterialCommunityIcons name="arrow-left" size={22} color={Colors.textPrimary} />
           </TouchableOpacity>
           <View style={{ flex: 1, marginLeft: Spacing.md }}>
@@ -620,7 +623,8 @@ ${truncatedText}`;
 
 const THUMB = (SW - Spacing.lg * 2 - Spacing.md * 2) / 3;
 
-const styles = StyleSheet.create({
+function createStyles() {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   contentWrapper: { flex: 1, maxWidth: 800, width: '100%', alignSelf: 'center' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xxxl },
@@ -780,4 +784,5 @@ const styles = StyleSheet.create({
   },
   catHeaderText: { fontFamily: 'Poppins-Bold', fontSize: 14, color: Colors.textPrimary, textTransform: 'uppercase', letterSpacing: 0.5 },
   catHeaderCount: { ...Typography.caption, color: Colors.textMuted, marginLeft: 4 },
-});
+  });
+}

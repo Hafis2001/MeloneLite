@@ -23,7 +23,8 @@ export const generateReceiptHTML = (
   order: Order,
   items: OrderItem[],
   settings: Settings,
-  isPdf: boolean = false
+  isPdf: boolean = false,
+  isTakeOrder: boolean = false
 ): string => {
   const sym = settings.currency_symbol || '₹';
   const dec = settings.decimal_places || '2';
@@ -35,8 +36,10 @@ export const generateReceiptHTML = (
         <td style="padding:10px; border-bottom:1px solid #eee;">${index + 1}</td>
         <td style="padding:10px; border-bottom:1px solid #eee;">${item.item_name}</td>
         <td style="padding:10px; text-align:center; border-bottom:1px solid #eee;">${item.quantity}</td>
+        ${!isTakeOrder ? `
         <td style="padding:10px; text-align:right; border-bottom:1px solid #eee;">${formatCurrency(item.rate, sym, dec)}</td>
         <td style="padding:10px; text-align:right; border-bottom:1px solid #eee; font-weight:bold;">${formatCurrency(item.subtotal, sym, dec)}</td>
+        ` : ''}
       </tr>
     `).join('');
 
@@ -95,7 +98,8 @@ export const generateReceiptHTML = (
           <div class="order-info-block" style="text-align: right;">
             ${order.table_no ? `<p><strong>Table:</strong> ${order.table_no}</p>` : ''}
             ${order.customer_name ? `<p><strong>Customer:</strong> ${order.customer_name}</p>` : ''}
-            <p><strong>Payment Method:</strong> ${order.payment_method}</p>
+            ${order.notes ? `<p><strong>Remark:</strong> ${order.notes}</p>` : ''}
+            ${!isTakeOrder ? `<p><strong>Payment Method:</strong> ${order.payment_method}</p>` : ''}
           </div>
         </div>
 
@@ -103,10 +107,12 @@ export const generateReceiptHTML = (
           <thead>
             <tr>
               <th width="10%">#</th>
-              <th width="40%">Item Description</th>
+              <th width="${isTakeOrder ? '80%' : '40%'}">Item Description</th>
               <th width="10%">Qty</th>
+              ${!isTakeOrder ? `
               <th width="20%">Price</th>
               <th width="20%">Total</th>
+              ` : ''}
             </tr>
           </thead>
           <tbody>
@@ -114,6 +120,7 @@ export const generateReceiptHTML = (
           </tbody>
         </table>
 
+        ${!isTakeOrder ? `
         <div class="totals-container">
           <div class="totals">
             <p><span>Subtotal:</span><span>${formatCurrency(order.subtotal, sym, dec)}</span></p>
@@ -124,6 +131,7 @@ export const generateReceiptHTML = (
             </div>
           </div>
         </div>
+        ` : ''}
 
         <div class="footer">
           <p>${settings.receipt_footer || 'Thank you for your business!'}</p>
@@ -136,13 +144,15 @@ export const generateReceiptHTML = (
     // Thermal Receipt Format (280px width)
     const itemRows = items.map(item => `
       <tr>
-        <td colspan="4" style="padding:6px 0 2px 0; font-size:12px; font-weight:bold;">${item.item_name}</td>
+        <td colspan="${isTakeOrder ? '2' : '4'}" style="padding:6px 0 2px 0; font-size:12px; font-weight:bold;">${item.item_name}</td>
       </tr>
       <tr>
         <td style="padding:2px 0 6px 0; font-size:11px; color:#444;"></td>
         <td style="padding:2px 0 6px 0; font-size:11px; text-align:center; border-bottom:1px dashed #ccc;">${item.quantity}</td>
+        ${!isTakeOrder ? `
         <td style="padding:2px 0 6px 0; font-size:11px; text-align:right; border-bottom:1px dashed #ccc;">${formatCurrency(item.rate, sym, dec)}</td>
         <td style="padding:2px 0 6px 0; font-size:11px; text-align:right; border-bottom:1px dashed #ccc;">${formatCurrency(item.subtotal, sym, dec)}</td>
+        ` : ''}
       </tr>
     `).join('');
 
@@ -190,7 +200,8 @@ export const generateReceiptHTML = (
           <p><strong>Date:</strong> ${formatDate(order.created_at)}</p>
           ${order.table_no ? `<p><strong>Table:</strong> ${order.table_no}</p>` : ''}
           ${order.customer_name ? `<p><strong>Customer:</strong> ${order.customer_name}</p>` : ''}
-          <p><strong>Payment:</strong> ${order.payment_method}</p>
+          ${order.notes ? `<p><strong>Remark:</strong> ${order.notes}</p>` : ''}
+          ${!isTakeOrder ? `<p><strong>Payment:</strong> ${order.payment_method}</p>` : ''}
         </div>
 
         <table>
@@ -198,8 +209,10 @@ export const generateReceiptHTML = (
             <tr>
               <th>Item</th>
               <th>Qty</th>
+              ${!isTakeOrder ? `
               <th>Rate</th>
               <th>Amt</th>
+              ` : ''}
             </tr>
           </thead>
           <tbody>
@@ -207,6 +220,7 @@ export const generateReceiptHTML = (
           </tbody>
         </table>
 
+        ${!isTakeOrder ? `
         <div class="totals">
           <p><span>Subtotal:</span><span>${formatCurrency(order.subtotal, sym, dec)}</span></p>
           ${order.discount > 0 ? `<p><span>Discount:</span><span>- ${formatCurrency(order.discount, sym, dec)}</span></p>` : ''}
@@ -215,6 +229,7 @@ export const generateReceiptHTML = (
             <span>${formatCurrency(order.grand_total, sym, dec)}</span>
           </div>
         </div>
+        ` : ''}
 
         <div class="footer">
           <p>${settings.receipt_footer || 'Thank you for dining with us!'}</p>
@@ -229,15 +244,16 @@ export const generateReceiptHTML = (
 export const printReceipt = async (
   order: Order,
   items: OrderItem[],
-  settings: Settings
+  settings: Settings,
+  isTakeOrder: boolean = false
 ): Promise<boolean> => {
   try {
     // If we have a connected printer or a saved one to reconnect to
     if (printerService.connected || printerService.currentPrinter) {
-      return await printerService.printOrder(order, items, settings);
+      return await printerService.printOrder(order, items, settings, isTakeOrder);
     } else {
       // No printer configured, fallback to system print (PDF)
-      const html = generateReceiptHTML(order, items, settings, false);
+      const html = generateReceiptHTML(order, items, settings, false, isTakeOrder);
       await Print.printAsync({ html });
       return true; // We assume system print "started" successfully
     }

@@ -357,7 +357,6 @@ export default function UtilitySettingsScreen() {
             oldCat.name_ml || null,
             oldCat.name_ta || null,
             oldCat.name_hi || null,
-            oldCat.name_kn || null,
             oldCat.color || '#D4A853'
           );
           categoryIdMap.set(oldCat.id, newId);
@@ -442,17 +441,17 @@ export default function UtilitySettingsScreen() {
                     currentItem.id,
                     currentItem.item_code,
                     currentItem.item_name,
-                    currentItem.item_name_ar,
-                    currentItem.item_name_ml,
-                    currentItem.item_name_ta,
-                    currentItem.item_name_hi,
-                    currentItem.item_name_kn,
+                    currentItem.item_name_ar || null,
+                    currentItem.item_name_ml || null,
+                    currentItem.item_name_ta || null,
+                    currentItem.item_name_hi || null,
+                    currentItem.item_name_kn || null,
                     currentItem.rate,
                     currentItem.category_id,
                     url,
                     currentItem.is_available,
-                    currentItem.barcode,
-                    currentItem.prices_json
+                    currentItem.barcode || null,
+                    currentItem.prices_json || null
                   );
                   generatedCount++;
                 }
@@ -526,7 +525,7 @@ export default function UtilitySettingsScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={styles.contentWrapper}>
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 16 }}>
+            <TouchableOpacity onPress={() => { if(router.canGoBack()) router.back(); else router.replace('/(tabs)'); }} style={{ marginRight: 16 }}>
               <MaterialCommunityIcons name="arrow-left" size={28} color={Colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Utility Settings</Text>
@@ -729,7 +728,7 @@ export default function UtilitySettingsScreen() {
 
             {/* Sub-section 1: Menu Transfer */}
             <View style={{ marginBottom: Spacing.xl }}>
-              <Text style={[styles.fieldLabel, { marginBottom: Spacing.xs, color: Colors.gold, fontFamily: Typography.semiBold }]}>
+              <Text style={[styles.fieldLabel, { marginBottom: Spacing.xs, color: Colors.gold, fontFamily: 'Poppins-SemiBold' }]}>
                 1. Menu Transfer (Categories & Items)
               </Text>
               <Text style={[styles.fieldLabel, { marginBottom: Spacing.md }]}>
@@ -755,7 +754,7 @@ export default function UtilitySettingsScreen() {
 
             {/* Sub-section 2: Full Database */}
             <View>
-              <Text style={[styles.fieldLabel, { marginBottom: Spacing.xs, color: Colors.gold, fontFamily: Typography.semiBold }]}>
+              <Text style={[styles.fieldLabel, { marginBottom: Spacing.xs, color: Colors.gold, fontFamily: 'Poppins-SemiBold' }]}>
                 2. Full Database Backup
               </Text>
               <Text style={[styles.fieldLabel, { marginBottom: Spacing.md }]}>
@@ -814,7 +813,7 @@ export default function UtilitySettingsScreen() {
                     <MaterialCommunityIcons name="close" size={24} color={Colors.textPrimary} />
                   </TouchableOpacity>
                 </View>
-                <Text style={{ color: Colors.textMuted, marginBottom: 12, fontFamily: Typography.regular, fontSize: 13 }}>
+                <Text style={{ color: Colors.textMuted, marginBottom: 12, fontFamily: 'Poppins-Regular', fontSize: 13 }}>
                   Tap the file you want to restore/import:
                 </Text>
                 <FlatList
@@ -858,7 +857,7 @@ export default function UtilitySettingsScreen() {
                           <Text style={[styles.dbFileText, (!isJson && !isDb) && { color: Colors.textMuted }]} numberOfLines={2}>
                             {item.name}
                           </Text>
-                          <Text style={{ fontSize: 11, color: Colors.gold, fontFamily: Typography.regular }}>
+                          <Text style={{ fontSize: 11, color: Colors.gold, fontFamily: 'Poppins-Regular' }}>
                             {isJson ? 'Tap to import menu' : (isDb ? 'Tap to restore this database' : 'Unsupported format')}
                           </Text>
                         </View>
@@ -1253,8 +1252,8 @@ function createStyles() {
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   dbFileText: {
-    color: Colors.text,
-    fontFamily: Typography.medium,
+    color: Colors.textPrimary,
+    fontFamily: 'Poppins-Medium',
     fontSize: 14,
     flex: 1,
   },
