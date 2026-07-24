@@ -6,9 +6,19 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "credentialsSource": "local"
+      }
     },
     "preview": {
+      "distribution": "internal"
+    },
+    "apk": {
+      "android": {
+        "buildType": "apk",
+        "credentialsSource": "local"
+      },
       "distribution": "internal"
     },
     "production": {

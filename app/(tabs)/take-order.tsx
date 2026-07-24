@@ -17,6 +17,54 @@ import { DualText } from '../../src/components/DualText';
 import { t } from '../../src/utils/translations';
 import { useThemeVersion } from '../../src/context/ThemeContext';
 
+const GridQtyEditor = ({ qty, itemId, updateQuantity, styles }: any) => {
+  const [qtyStr, setQtyStr] = React.useState(String(qty));
+
+  React.useEffect(() => {
+    if (parseFloat(qtyStr) !== qty) {
+      setQtyStr(String(qty));
+    }
+  }, [qty]);
+
+  return (
+    <View style={styles.qtyControlsFull}>
+      <TouchableOpacity
+        style={styles.qtyBtn}
+        onPress={() => updateQuantity(itemId, qty - 1)}
+      >
+        <MaterialCommunityIcons name="minus" size={20} color={Colors.gold} />
+      </TouchableOpacity>
+      <TextInput 
+        style={[styles.qtyTextFull, { minWidth: 40, textAlign: 'center', padding: 0 }]}
+        value={qtyStr}
+        onChangeText={(text) => {
+          setQtyStr(text);
+          if (text === '' || text === '0' || text === '0.' || text === '.') return;
+          const val = parseFloat(text);
+          if (!isNaN(val)) {
+            updateQuantity(itemId, val);
+          }
+        }}
+        onEndEditing={() => {
+          const val = parseFloat(qtyStr);
+          if (isNaN(val) || val <= 0) {
+            updateQuantity(itemId, 0);
+          } else {
+            updateQuantity(itemId, val);
+          }
+        }}
+        keyboardType="decimal-pad"
+      />
+      <TouchableOpacity
+        style={styles.qtyBtn}
+        onPress={() => updateQuantity(itemId, qty + 1)}
+      >
+        <MaterialCommunityIcons name="plus" size={20} color={Colors.gold} />
+      </TouchableOpacity>
+    </View>
+  );
+};
+
 export default function TakeOrderScreen() {
   const themeVersion = useThemeVersion();
   const styles = useMemo(() => createStyles(), [themeVersion]);
@@ -31,7 +79,7 @@ export default function TakeOrderScreen() {
 
   // Barcode → quantity modal
   const [barcodeModalItem, setBarcodeModalItem] = useState<Item | null>(null);
-  const [barcodeQty, setBarcodeQty] = useState(1);
+  const [barcodeQty, setBarcodeQty] = useState("1");
   const [barcodeModalVisible, setBarcodeModalVisible] = useState(false);
   const scaleAnim = useRef(new Animated.Value(0.85)).current;
 
@@ -39,7 +87,7 @@ export default function TakeOrderScreen() {
   const [variantModalVisible, setVariantModalVisible] = useState(false);
   const [variantModalItem, setVariantModalItem] = useState<{ item: Item, prices: {name: string, price: number}[] } | null>(null);
   const [selectedVariantIdx, setSelectedVariantIdx] = useState(0);
-  const [variantQty, setVariantQty] = useState(1);
+  const [variantQty, setVariantQty] = useState("1");
 
   const { addItem, getItemQuantity, updateQuantity, getTotalItems, getSubtotal } = useTakeOrderCart();
   const { width, height } = useWindowDimensions();
@@ -67,12 +115,12 @@ export default function TakeOrderScreen() {
       // Small delay to let screen settle
       setTimeout(() => {
         setBarcodeModalItem({ id: -1, item_name: `Barcode: ${bc}`, rate: 0, item_code: '', image_uri: null, is_available: 0, created_at: '', category_id: null } as any);
-        setBarcodeQty(1);
+        setBarcodeQty("1");
         setBarcodeModalVisible(true);
       }, 300);
     } else {
       setBarcodeModalItem(found);
-      setBarcodeQty(1);
+      setBarcodeQty("1");
       setBarcodeModalVisible(true);
     }
   }, [params.scannedBarcode]);
@@ -126,7 +174,7 @@ export default function TakeOrderScreen() {
   const closeBarcodeModal = () => {
     setBarcodeModalVisible(false);
     setBarcodeModalItem(null);
-    setBarcodeQty(1);
+    setBarcodeQty("1");
     // Clear the param so re-scan works
     lastHandledBarcode.current = '';
   };
@@ -138,13 +186,14 @@ export default function TakeOrderScreen() {
     }
     const currentQty = getItemQuantity(barcodeModalItem.id);
     
+    const bQtyNum = parseFloat(barcodeQty) || 1;
     if (currentQty === 0) {
       addItem(barcodeModalItem);
-      if (barcodeQty > 1) {
-        updateQuantity(`${barcodeModalItem.id}-default`, barcodeQty);
+      if (bQtyNum > 1) {
+        updateQuantity(`${barcodeModalItem.id}-default`, bQtyNum);
       }
     } else {
-      updateQuantity(`${barcodeModalItem.id}-default`, currentQty + barcodeQty);
+      updateQuantity(`${barcodeModalItem.id}-default`, currentQty + bQtyNum);
     }
     closeBarcodeModal();
   };
@@ -152,7 +201,7 @@ export default function TakeOrderScreen() {
   const openVariantModal = (item: Item, prices: {name: string, price: number}[]) => {
     setVariantModalItem({ item, prices });
     setSelectedVariantIdx(0);
-    setVariantQty(1);
+    setVariantQty("1");
     setVariantModalVisible(true);
   };
 
@@ -167,8 +216,9 @@ export default function TakeOrderScreen() {
     const selectedVariant = prices[selectedVariantIdx];
     
     addItem(item, selectedVariant);
-    if (variantQty > 1) {
-      updateQuantity(`${item.id}-${selectedVariant.name}`, variantQty);
+    const vQtyNum = parseFloat(variantQty) || 1;
+    if (vQtyNum > 0) {
+      updateQuantity(`${item.id}-${selectedVariant.name}`, vQtyNum);
     }
     closeVariantModal();
   };
@@ -274,21 +324,7 @@ export default function TakeOrderScreen() {
                   <Text style={styles.addBtnFullText}>Add</Text>
                 </TouchableOpacity>
               ) : (
-                <View style={styles.qtyControlsFull}>
-                  <TouchableOpacity
-                    style={styles.qtyBtn}
-                    onPress={() => updateQuantity(`${item.id}-default`, qty - 1)}
-                  >
-                    <MaterialCommunityIcons name="minus" size={20} color={Colors.gold} />
-                  </TouchableOpacity>
-                  <Text style={styles.qtyTextFull}>{qty}</Text>
-                  <TouchableOpacity
-                    style={styles.qtyBtn}
-                    onPress={() => updateQuantity(`${item.id}-default`, qty + 1)}
-                  >
-                    <MaterialCommunityIcons name="plus" size={20} color={Colors.gold} />
-                  </TouchableOpacity>
-                </View>
+                <GridQtyEditor qty={qty} itemId={`${item.id}-default`} updateQuantity={updateQuantity} styles={styles} />
               )}
             </View>
           </View>
@@ -460,18 +496,23 @@ export default function TakeOrderScreen() {
                     <Text style={styles.modalQtyLabel}>Select Quantity</Text>
                     <View style={styles.modalQtyRow}>
                       <TouchableOpacity
-                        style={[styles.modalQtyBtn, barcodeQty <= 1 && { opacity: 0.4 }]}
-                        onPress={() => setBarcodeQty(q => Math.max(1, q - 1))}
-                        disabled={barcodeQty <= 1}
+                        style={[styles.modalQtyBtn, (parseFloat(barcodeQty) || 1) <= 1 && { opacity: 0.4 }]}
+                        onPress={() => setBarcodeQty(q => String(Math.max(1, (parseFloat(q) || 0) - 1)))}
+                        disabled={(parseFloat(barcodeQty) || 1) <= 1}
                       >
                         <MaterialCommunityIcons name="minus" size={20} color={Colors.gold} />
                       </TouchableOpacity>
                       <View style={styles.modalQtyDisplay}>
-                        <Text style={styles.modalQtyNumber}>{barcodeQty}</Text>
+                        <TextInput 
+                          style={[styles.modalQtyNumber, { minWidth: 40, textAlign: 'center', padding: 0 }]}
+                          value={barcodeQty}
+                          onChangeText={setBarcodeQty}
+                          keyboardType="decimal-pad"
+                        />
                       </View>
                       <TouchableOpacity
                         style={styles.modalQtyBtn}
-                        onPress={() => setBarcodeQty(q => q + 1)}
+                        onPress={() => setBarcodeQty(q => String((parseFloat(q) || 0) + 1))}
                       >
                         <MaterialCommunityIcons name="plus" size={20} color={Colors.gold} />
                       </TouchableOpacity>
@@ -480,7 +521,7 @@ export default function TakeOrderScreen() {
                     {/* Subtotal */}
                     <View style={styles.modalSubtotalRow}>
                       <Text style={styles.modalSubtotalLabel}>Subtotal</Text>
-                      <Text style={styles.modalSubtotalValue}>{formatCurrency(barcodeModalItem.rate * barcodeQty)}</Text>
+                      <Text style={styles.modalSubtotalValue}>{formatCurrency(barcodeModalItem.rate * (parseFloat(barcodeQty) || 1))}</Text>
                     </View>
 
                     {/* Buttons */}
@@ -562,18 +603,23 @@ export default function TakeOrderScreen() {
                     <Text style={styles.modalQtyLabel}>Quantity</Text>
                     <View style={styles.modalQtyRow}>
                       <TouchableOpacity
-                        style={[styles.modalQtyBtn, variantQty <= 1 && { opacity: 0.4 }]}
-                        onPress={() => setVariantQty(q => Math.max(1, q - 1))}
-                        disabled={variantQty <= 1}
+                        style={[styles.modalQtyBtn, (parseFloat(variantQty) || 1) <= 1 && { opacity: 0.4 }]}
+                        onPress={() => setVariantQty(q => String(Math.max(1, (parseFloat(q) || 0) - 1)))}
+                        disabled={(parseFloat(variantQty) || 1) <= 1}
                       >
                         <MaterialCommunityIcons name="minus" size={20} color={Colors.gold} />
                       </TouchableOpacity>
                       <View style={styles.modalQtyDisplay}>
-                        <Text style={styles.modalQtyNumber}>{variantQty}</Text>
+                        <TextInput 
+                          style={[styles.modalQtyNumber, { minWidth: 40, textAlign: 'center', padding: 0 }]}
+                          value={variantQty}
+                          onChangeText={setVariantQty}
+                          keyboardType="decimal-pad"
+                        />
                       </View>
                       <TouchableOpacity
                         style={styles.modalQtyBtn}
-                        onPress={() => setVariantQty(q => q + 1)}
+                        onPress={() => setVariantQty(q => String((parseFloat(q) || 0) + 1))}
                       >
                         <MaterialCommunityIcons name="plus" size={20} color={Colors.gold} />
                       </TouchableOpacity>

@@ -23,6 +23,64 @@ import { syncOrders } from '../backgroundSync';
 
 const PAYMENT_METHODS = ['Cash', 'Card', 'UPI'];
 
+const CartItemRow = ({ ci, updateQuantity, removeItem, formatCurrency, styles }: any) => {
+  const [qtyStr, setQtyStr] = useState(String(ci.quantity));
+
+  React.useEffect(() => {
+    if (parseFloat(qtyStr) !== ci.quantity) {
+      setQtyStr(String(ci.quantity));
+    }
+  }, [ci.quantity]);
+
+  return (
+    <View style={styles.cartItem}>
+      <View style={styles.cartItemTopRow}>
+        <Text style={styles.cartItemName} numberOfLines={1}>
+          {ci.item.item_name}
+          {ci.selectedVariant ? ` — ${ci.selectedVariant.name}` : ''}
+        </Text>
+        <TouchableOpacity onPress={() => removeItem(ci.cartItemId)} style={styles.removeBtn}>
+          <MaterialCommunityIcons name="close" size={16} color={Colors.textMuted} />
+        </TouchableOpacity>
+      </View>
+      <View style={styles.cartItemBottomRow}>
+        <Text style={styles.cartItemRate}>{formatCurrency(ci.selectedVariant ? ci.selectedVariant.price : ci.item.rate)}</Text>
+        <View style={styles.qtyControls}>
+          <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(ci.cartItemId, ci.quantity - 1)}>
+            <MaterialCommunityIcons name="minus" size={14} color={Colors.gold} />
+          </TouchableOpacity>
+          <TextInput 
+            style={[styles.qtyText, { minWidth: 30, textAlign: 'center', padding: 0 }]}
+            value={qtyStr}
+            onChangeText={(text) => {
+              setQtyStr(text);
+              if (text === '' || text === '0' || text === '0.' || text === '.') return;
+              const val = parseFloat(text);
+              if (!isNaN(val)) {
+                updateQuantity(ci.cartItemId, val);
+              }
+            }}
+            onEndEditing={() => {
+              const val = parseFloat(qtyStr);
+              if (isNaN(val) || val <= 0) {
+                updateQuantity(ci.cartItemId, 0);
+              } else {
+                updateQuantity(ci.cartItemId, val);
+              }
+            }}
+            keyboardType="decimal-pad"
+          />
+          <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(ci.cartItemId, ci.quantity + 1)}>
+            <MaterialCommunityIcons name="plus" size={14} color={Colors.gold} />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.cartItemSubtotal}>{formatCurrency((ci.selectedVariant ? ci.selectedVariant.price : ci.item.rate) * ci.quantity)}</Text>
+      </View>
+    </View>
+  );
+};
+
+
 export default function CartScreen() {
   const themeVersion = useThemeVersion();
   const segments = useSegments();
@@ -170,30 +228,7 @@ export default function CartScreen() {
               <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg }} showsVerticalScrollIndicator={false}>
                 <View style={[styles.section, { marginBottom: Spacing.md }]}>
                 {state.items.map(ci => (
-                  <View key={ci.cartItemId} style={styles.cartItem}>
-                    <View style={styles.cartItemTopRow}>
-                      <Text style={styles.cartItemName} numberOfLines={1}>
-                        {ci.item.item_name}
-                        {ci.selectedVariant ? ` — ${ci.selectedVariant.name}` : ''}
-                      </Text>
-                      <TouchableOpacity onPress={() => removeItem(ci.cartItemId)} style={styles.removeBtn}>
-                        <MaterialCommunityIcons name="close" size={16} color={Colors.textMuted} />
-                      </TouchableOpacity>
-                    </View>
-                    <View style={styles.cartItemBottomRow}>
-                      <Text style={styles.cartItemRate}>{formatCurrency(ci.selectedVariant ? ci.selectedVariant.price : ci.item.rate)}</Text>
-                      <View style={styles.qtyControls}>
-                        <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(ci.cartItemId, ci.quantity - 1)}>
-                          <MaterialCommunityIcons name="minus" size={14} color={Colors.gold} />
-                        </TouchableOpacity>
-                        <Text style={styles.qtyText}>{ci.quantity}</Text>
-                        <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQuantity(ci.cartItemId, ci.quantity + 1)}>
-                          <MaterialCommunityIcons name="plus" size={14} color={Colors.gold} />
-                        </TouchableOpacity>
-                      </View>
-                      <Text style={styles.cartItemSubtotal}>{formatCurrency((ci.selectedVariant ? ci.selectedVariant.price : ci.item.rate) * ci.quantity)}</Text>
-                    </View>
-                  </View>
+                  <CartItemRow key={ci.cartItemId} ci={ci} updateQuantity={updateQuantity} removeItem={removeItem} formatCurrency={formatCurrency} styles={styles} />
                 ))}
                 </View>
               </ScrollView>

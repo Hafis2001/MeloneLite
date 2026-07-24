@@ -733,6 +733,7 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
     }
   };
 
+
   const handleActivateDemo = async () => {
     if (!demoShopName.trim() || !demoPhone.trim()) {
       Alert.alert("Required", "Please enter both Shop Name and Phone Number");
@@ -802,6 +803,8 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
       await AsyncStorage.setItem("demo_company", demoShopName);
       await AsyncStorage.setItem("demo_client_id", demoClientId);
       await AsyncStorage.setItem("demoUsed", "true");             // Prevent re-use
+
+
       // Clear any leftover real license data
       await AsyncStorage.multiRemove(["real_license_key", "real_customer_name", "real_client_id", "real_expiry", "real_status"]);
 
