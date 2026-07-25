@@ -1,5 +1,5 @@
 const CONFIG = {
-  BASE_URL: 'https://meloneappbackend-production.up.railway.app',
+  BASE_URL: 'https://litebackend.melone.in',
 };
 
 export default CONFIG;
