@@ -7,6 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { getDB } from '../../src/db/database';
 import { Colors, Spacing, Radius, Typography, Shadows } from '../../src/constants/theme';
 import { useThemeVersion } from '../../src/context/ThemeContext';
+import Constants from 'expo-constants';
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
 
 export default function AboutSettingsScreen() {
   const themeVersion = useThemeVersion();
@@ -127,8 +129,11 @@ export default function AboutSettingsScreen() {
                 "demo_key", "demo_expiry", "demo_company", "demo_client_id",
                 "real_license_key", "real_customer_name", "real_client_id",
                 "real_expiry", "real_status", "real_is_expired",
+                "demo_google_email",
               ]);
 
+              // Also sign out of Google if demo license
+              try { await GoogleSignin.signOut(); } catch (_) {}
               setLicenseInfo({ isDemo: false, expiry: null, clientId: '', customerName: '', status: '' });
               router.replace("/license");
             } catch (error) {
@@ -243,7 +248,7 @@ export default function AboutSettingsScreen() {
 
             <View style={styles.infoCard}>
               <MaterialCommunityIcons name="information-outline" size={16} color={Colors.textMuted} />
-              <Text style={styles.infoText}>MeloneLite V 2.1.1 • </Text>
+              <Text style={styles.infoText}>MeloneLite V {Constants.expoConfig?.version || '3.1.1'} • </Text>
             </View>
             <View style={{ height: 40 }} />
           </ScrollView>

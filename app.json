@@ -2,7 +2,7 @@
   "expo": {
     "name": "MeloneLite",
     "slug": "MeloneLite",
-    "version": "2.2.2",
+    "version": "3.1.1",
     "orientation": "default",
     "icon": "./assets/appnew.png",
     "userInterfaceStyle": "dark",
@@ -13,7 +13,7 @@
       "backgroundColor": "#FFFFFF"
     },
     "ios": {
-      "buildNumber": "2",
+      "buildNumber": "3",
       "supportsTablet": true,
       "bundleIdentifier": "com.melonelite.restaurant",
       "infoPlist": {
@@ -22,14 +22,13 @@
       }
     },
     "android": {
-       
       "adaptiveIcon": {
         "foregroundImage": "./assets/appnew.png",
         "backgroundColor": "#FFFFFF"
       },
       "package": "com.melonelite.restaurant",
       "usesCleartextTraffic": true,
-      "versionCode": 5,
+      "versionCode": 6,
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
@@ -48,15 +47,44 @@
         {
           "action": "VIEW",
           "data": [
-            { "scheme": "content", "mimeType": "application/json" },
-            { "scheme": "file", "mimeType": "application/json" },
-            { "scheme": "content", "mimeType": "application/octet-stream" },
-            { "scheme": "file", "mimeType": "application/octet-stream" },
-            { "scheme": "content", "mimeType": "application/x-sqlite3" },
-            { "scheme": "content", "mimeType": "application/vnd.sqlite3" },
-            { "scheme": "content", "mimeType": "application/sql" },
-            { "scheme": "content", "mimeType": "*/*", "pathPattern": ".*\\\\.db" },
-            { "scheme": "content", "mimeType": "*/*", "pathPattern": ".*\\\\.json" }
+            {
+              "scheme": "content",
+              "mimeType": "application/json"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "application/json"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "application/octet-stream"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "application/octet-stream"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "application/x-sqlite3"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "application/vnd.sqlite3"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "application/sql"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "*/*",
+              "pathPattern": ".*\\\\.db"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "*/*",
+              "pathPattern": ".*\\\\.json"
+            }
           ],
           "category": [
             "BROWSABLE",
@@ -87,7 +115,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "@react-native-google-signin/google-signin"
     ],
     "extra": {
       "router": {},

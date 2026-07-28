@@ -18,6 +18,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
 } from "react-native";
+import { GoogleSignin, statusCodes } from "@react-native-google-signin/google-signin";
 
 const COUNTRY_CODES = [
   { code: '+91', name: 'India', flag: '🇮🇳', length: 10 },
@@ -74,8 +75,13 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
   const [demoUsed, setDemoUsed] = useState(false);
   const [demoRemainingDays, setDemoRemainingDays] = useState<number | null>(null);
   const [isUpgradeMode, setIsUpgradeMode] = useState(false);
+  const [googleUser, setGoogleUser] = useState<{ email: string; name: string | null; photo: string | null; id: string } | null>(null);
+  const [googleSigningIn, setGoogleSigningIn] = useState(false);
 
   useEffect(() => {
+    GoogleSignin.configure({
+      webClientId: '573541940618-idg0j8jejtk4do05246stvaevucd5s47.apps.googleusercontent.com',
+    });
     if (params.mode === 'upgrade') {
       setIsUpgradeMode(true);
     }
@@ -734,6 +740,58 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
   };
 
 
+  // --- Google Sign-In helper ---
+  const signInWithGoogle = async (): Promise<{ email: string; name: string | null; photo: string | null; id: string } | null> => {
+    try {
+      // Check if already signed in
+      const currentUser = await GoogleSignin.getCurrentUser();
+      if (currentUser) {
+        const u = { email: currentUser.data?.user.email ?? '', name: currentUser.data?.user.name ?? null, photo: currentUser.data?.user.photo ?? null, id: currentUser.data?.user.id ?? '' };
+        setGoogleUser(u);
+        return u;
+      }
+
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      const response = await GoogleSignin.signIn();
+      if (response.data?.user) {
+        const u = { email: response.data.user.email ?? '', name: response.data.user.name ?? null, photo: response.data.user.photo ?? null, id: response.data.user.id ?? '' };
+        setGoogleUser(u);
+        return u;
+      }
+      return null;
+    } catch (error: any) {
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        // User cancelled — no message
+        return null;
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        Alert.alert('Google Play Services Not Available', 'Please update Google Play Services and try again.');
+        return null;
+      } else {
+        console.error('Google Sign-In error:', error);
+        Alert.alert('Sign-In Error', 'Something went wrong, please try again.');
+        return null;
+      }
+    }
+  };
+
+  // --- Check if a Gmail email has already used a demo ---
+  const isEmailUsedForDemo = async (email: string): Promise<boolean> => {
+    const usedEmailsStr = await AsyncStorage.getItem('demo_used_emails');
+    if (!usedEmailsStr) return false;
+    const usedEmails: string[] = JSON.parse(usedEmailsStr);
+    return usedEmails.includes(email.toLowerCase());
+  };
+
+  // --- Save Gmail as used after demo activation ---
+  const markEmailAsUsed = async (email: string) => {
+    const usedEmailsStr = await AsyncStorage.getItem('demo_used_emails');
+    const usedEmails: string[] = usedEmailsStr ? JSON.parse(usedEmailsStr) : [];
+    if (!usedEmails.includes(email.toLowerCase())) {
+      usedEmails.push(email.toLowerCase());
+      await AsyncStorage.setItem('demo_used_emails', JSON.stringify(usedEmails));
+    }
+  };
+
   const handleActivateDemo = async () => {
     if (!demoShopName.trim() || !demoPhone.trim()) {
       Alert.alert("Required", "Please enter both Shop Name and Phone Number");
@@ -804,6 +862,11 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
       await AsyncStorage.setItem("demo_client_id", demoClientId);
       await AsyncStorage.setItem("demoUsed", "true");             // Prevent re-use
 
+      // Save the Google email as used (so same email cannot start another demo)
+      if (googleUser?.email) {
+        await markEmailAsUsed(googleUser.email);
+        await AsyncStorage.setItem('demo_google_email', googleUser.email);
+      }
 
       // Clear any leftover real license data
       await AsyncStorage.multiRemove(["real_license_key", "real_customer_name", "real_client_id", "real_expiry", "real_status"]);
@@ -915,20 +978,43 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
             {(!demoUsed || demoRemainingDays !== null) && (
               <TouchableOpacity 
                 style={styles.demoLink} 
-                onPress={() => {
+                onPress={async () => {
                   if (demoRemainingDays !== null) {
-                    handleActivateDemo(); // Resume immediately
+                    // Resuming an existing active demo — no Google gate needed
+                    handleActivateDemo();
                   } else {
+                    // New demo — require Google Sign-In first
+                    setGoogleSigningIn(true);
+                    const user = await signInWithGoogle();
+                    setGoogleSigningIn(false);
+                    if (!user) return; // cancelled or error
+
+                    // Check if this email already used a demo
+                    const used = await isEmailUsedForDemo(user.email);
+                    if (used) {
+                      Alert.alert(
+                        'Demo Already Used',
+                        `The demo for ${user.email} has already been used. Please purchase a full license.`,
+                        [{ text: 'OK' }]
+                      );
+                      return;
+                    }
+
+                    // Google verified, email is fresh — show the shop name/phone form
                     setShowDemoForm(true);
                   }
                 }}
-                disabled={loading}
+                disabled={loading || googleSigningIn}
               >
-                <Text style={styles.demoLinkText}>
-                  {demoRemainingDays !== null 
-                    ? `Continue Demo (${demoRemainingDays} days left)` 
-                    : 'Try Demo for 5 Days'}
-                </Text>
+                {googleSigningIn ? (
+                  <ActivityIndicator color="#FFD700" size="small" />
+                ) : (
+                  <Text style={styles.demoLinkText}>
+                    {demoRemainingDays !== null 
+                      ? `Continue Demo (${demoRemainingDays} days left)` 
+                      : 'Try Demo for 5 Days'}
+                  </Text>
+                )}
               </TouchableOpacity>
             )}
           </>

@@ -21,6 +21,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import CartScreen from './cart';
 import TakeOrderCartScreen from './take-order-cart';
 import { initBackgroundSync } from '../backgroundSync';
+import { checkAppVersion } from '../src/utils/versionCheck';
 import '../HeadlessTask';
 
 export default function RootLayout() {
@@ -187,13 +188,14 @@ export default function RootLayout() {
     checkAuth();
   }, [segments, fontsLoaded, dbReady]);
 
-  // Initialize background sync on mount
+  // Initialize background sync and check version on mount
   useEffect(() => {
     try {
       initBackgroundSync();
     } catch (e) {
       // Silently ignore — background sync setup failure must never crash the app
     }
+    checkAppVersion();
   }, []);
 
   // Background Image Generator for DB Restores
