@@ -1,5 +1,13 @@
-import { Alert, Platform, Linking } from 'react-native';
+import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+
+export interface UpdateInfo {
+  latestVersion: string;
+  currentVersion: string;
+  storeUrl?: string;
+  releaseNotes?: string;
+  mandatory: boolean;
+}
 
 interface PlatformVersionData {
   latest_version?: string;
@@ -23,11 +31,11 @@ interface VersionAPIResponse {
  */
 export const isNewerVersionAvailable = (currentVersion: string, targetVersion: string): boolean => {
   if (!currentVersion || !targetVersion) return false;
-  
+
   const currentParts = currentVersion.split('.').map(p => parseInt(p, 10) || 0);
   const targetParts = targetVersion.split('.').map(p => parseInt(p, 10) || 0);
   const len = Math.max(currentParts.length, targetParts.length);
-  
+
   for (let i = 0; i < len; i++) {
     const c = currentParts[i] || 0;
     const t = targetParts[i] || 0;
@@ -37,70 +45,52 @@ export const isNewerVersionAvailable = (currentVersion: string, targetVersion: s
   return false;
 };
 
-export const checkAppVersion = async (): Promise<void> => {
+/**
+ * Fetches the version info from the server.
+ * Returns an UpdateInfo object if an update is needed, otherwise null.
+ */
+export const checkAppVersion = async (): Promise<UpdateInfo | null> => {
   try {
-    const response = await fetch('https://ship.imcbs.com/api/v1/melone-lite/', {
-      headers: {
-        'Accept': 'application/json',
-      }
+    const response = await fetch('https://ship.imcbs.com/api/v1/melonelite/', {
+      headers: { 'Accept': 'application/json' },
     });
-    
-    if (!response.ok) return;
-    
+
+    if (!response.ok) return null;
+
     const result: VersionAPIResponse = await response.json();
-    if (result?.status !== 'success' || !result?.data) return;
-    
+    if (result?.status !== 'success' || !result?.data) return null;
+
     const data = result.data;
-    
-    // Pick appropriate platform data
+
     let platformData: PlatformVersionData | undefined;
     if (Platform.OS === 'ios') {
-      // For iPhone, only check if data.ios is present in API response
-      if (!data.ios) return;
+      if (!data.ios) return null;
       platformData = data.ios;
     } else {
       platformData = data.android;
     }
-    
-    if (!platformData || !platformData.latest_version) return;
-    
+
+    if (!platformData || !platformData.latest_version) return null;
+
     const currentVersion = Constants.expoConfig?.version || '1.0.0';
     const latestVersion = platformData.latest_version;
     const minVersion = platformData.min_version || '0.0.0';
     const storeUrl = platformData.store_url;
-    
-    // Check if store/latest version is higher than current version
-    if (isNewerVersionAvailable(currentVersion, latestVersion)) {
-      const isMandatory = isNewerVersionAvailable(currentVersion, minVersion);
-      
-      const alertTitle = "Update Available";
-      const alertMessage = data.release_notes && data.release_notes.trim() !== ''
-        ? `Latest update available please update\n\nRelease Notes:\n${data.release_notes}`
-        : "Latest update available please update";
-        
-      const buttons: any[] = [];
-      
-      if (!isMandatory) {
-        buttons.push({
-          text: "Later",
-          style: "cancel"
-        });
-      }
-      
-      buttons.push({
-        text: "Update Now",
-        onPress: () => {
-          if (storeUrl) {
-            Linking.openURL(storeUrl).catch(err => {
-              console.error("Could not open store url", err);
-            });
-          }
-        }
-      });
-      
-      Alert.alert(alertTitle, alertMessage, buttons, { cancelable: !isMandatory });
-    }
+
+    if (!isNewerVersionAvailable(currentVersion, latestVersion)) return null;
+
+    // Mandatory if current is below min_version
+    const mandatory = isNewerVersionAvailable(currentVersion, minVersion);
+
+    return {
+      latestVersion,
+      currentVersion,
+      storeUrl,
+      releaseNotes: data.release_notes,
+      mandatory,
+    };
   } catch (error) {
     console.warn('App version check failed:', error);
+    return null;
   }
 };

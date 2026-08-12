@@ -6,6 +6,8 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, StyleSheet, ActivityIndicator, useWindowDimensions, Platform } from 'react-native';
+import { UpdateModal } from '../src/components/UpdateModal';
+import { UpdateInfo } from '../src/utils/versionCheck';
 import * as Linking from 'expo-linking';
 import { useFonts } from 'expo-font';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -30,6 +32,7 @@ export default function RootLayout() {
   const [isLicensed, setIsLicensed] = useState<boolean | null>(null);
   const [isStaffLoggedIn, setIsStaffLoggedIn] = useState<boolean | null>(null);
   const [themeVersion, setThemeVersion] = useState(0);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const segments = useSegments();
   const router = useRouter();
 
@@ -195,7 +198,9 @@ export default function RootLayout() {
     } catch (e) {
       // Silently ignore — background sync setup failure must never crash the app
     }
-    checkAppVersion();
+    checkAppVersion().then(info => {
+      if (info) setUpdateInfo(info);
+    });
   }, []);
 
   // Background Image Generator for DB Restores
@@ -291,6 +296,17 @@ export default function RootLayout() {
 
   return (
     <ThemeContext.Provider value={{ refreshTheme, themeVersion }}>
+      {updateInfo && (
+        <UpdateModal
+          visible={true}
+          latestVersion={updateInfo.latestVersion}
+          currentVersion={updateInfo.currentVersion}
+          storeUrl={updateInfo.storeUrl}
+          releaseNotes={updateInfo.releaseNotes}
+          mandatory={updateInfo.mandatory}
+          onDismiss={() => setUpdateInfo(null)}
+        />
+      )}
       <GestureHandlerRootView style={{ flex: 1 }}>
         <CartProvider>
           <TakeOrderCartProvider>
