@@ -32,16 +32,22 @@ export async function syncOrders() {
     try {
       unsyncedOrders = db.getAllSync('SELECT * FROM orders WHERE synced = 0');
     } catch (dbErr) {
-      // Table may not have the synced column yet (migration pending) — skip safely
-      return;
+      // Table may not have the synced column yet (migration pending)
     }
 
-    if (!unsyncedOrders || unsyncedOrders.length === 0) {
+    let unsyncedTakeOrders = [];
+    try {
+      unsyncedTakeOrders = db.getAllSync("SELECT * FROM take_orders WHERE synced = 0 AND status = 'saved'");
+    } catch (dbErr) {
+      // Table may not have the synced column yet
+    }
+
+    if (unsyncedOrders.length === 0 && unsyncedTakeOrders.length === 0) {
       // Nothing to sync
       return;
     }
 
-    // Attach items and map grand_total to total
+    // Attach items and map grand_total to total for sales
     const ordersPayload = [];
     for (const order of unsyncedOrders) {
       let items = [];
@@ -52,7 +58,24 @@ export async function syncOrders() {
       }
       ordersPayload.push({
         ...order,
+        order_id: order.order_number, // Passing local generated order_number as order_id to backend
         total: order.grand_total || 0,
+        items: items
+      });
+    }
+
+    // Attach items for take_orders
+    const takeOrdersPayload = [];
+    for (const order of unsyncedTakeOrders) {
+      let items = [];
+      try {
+        items = db.getAllSync('SELECT * FROM take_order_items WHERE order_id = ?', [order.id]);
+      } catch (e) {
+        // ignore
+      }
+      takeOrdersPayload.push({
+        ...order,
+        order_id: order.order_number, // Passing local generated order_number as order_id to backend
         items: items
       });
     }
@@ -66,6 +89,7 @@ export async function syncOrders() {
       body: JSON.stringify({
         staff_id: staffId,
         orders: ordersPayload,
+        take_orders: takeOrdersPayload,
       }),
     });
 
@@ -73,12 +97,23 @@ export async function syncOrders() {
 
     // 5. On success, mark orders as synced
     if (data.success === true) {
+      // Mark sales as synced
       const ids = unsyncedOrders.map(o => o.id);
       if (ids.length > 0) {
         const placeholders = ids.map(() => '?').join(',');
         db.runSync(
           `UPDATE orders SET synced = 1 WHERE id IN (${placeholders})`,
           ids
+        );
+      }
+
+      // Mark take_orders as synced
+      const takeIds = unsyncedTakeOrders.map(o => o.id);
+      if (takeIds.length > 0) {
+        const placeholders = takeIds.map(() => '?').join(',');
+        db.runSync(
+          `UPDATE take_orders SET synced = 1 WHERE id IN (${placeholders})`,
+          takeIds
         );
       }
     }

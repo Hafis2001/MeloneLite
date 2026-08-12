@@ -353,7 +353,7 @@ export default function OrdersScreen() {
         {/* Header */}
       <View style={[styles.header, isLandscapePhone && styles.headerLandscape]}>
         <View style={styles.mainTabs}>
-          <TouchableOpacity style={[styles.mainTab, mainTab === 'Sales' && styles.mainTabActive]} onPress={() => setMainTab('Sales')}>
+          <TouchableOpacity style={[styles.mainTab, mainTab === 'Sales' && styles.mainTabActive]} onPress={() => { setMainTab('Sales'); loadOrders(); }}>
             <DualText text="Sales" style={[styles.mainTabText, mainTab === 'Sales' && styles.mainTabTextActive]} />
           </TouchableOpacity>
           <TouchableOpacity style={[styles.mainTab, mainTab === 'Orders' && styles.mainTabActive]} onPress={() => setMainTab('Orders')}>

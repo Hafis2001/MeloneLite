@@ -94,7 +94,8 @@ export const initDatabase = async (): Promise<void> => {
     'ALTER TABLE categories ADD COLUMN name_kn TEXT;',
     'ALTER TABLE items ADD COLUMN prices_json TEXT;',
     // Background sync: track which orders have been synced to the server
-    'ALTER TABLE orders ADD COLUMN synced INTEGER DEFAULT 0;'
+    'ALTER TABLE orders ADD COLUMN synced INTEGER DEFAULT 0;',
+    'ALTER TABLE take_orders ADD COLUMN synced INTEGER DEFAULT 0;'
   ];
 
   migrations.forEach(sql => {

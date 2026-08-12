@@ -102,6 +102,36 @@ export const updateTakeOrderStatus = (id: number, status: 'saved' | 'cancelled')
   const db = getDB();
   if (status === 'saved') {
     db.runSync('UPDATE take_orders SET status = ?, saved_at = datetime("now","localtime") WHERE id = ?', [status, id]);
+
+    // Insert into orders table to show in local sales reports
+    const takeOrder = getTakeOrderById(id);
+    if (takeOrder) {
+      const order_number = takeOrder.order_number;
+      // Check if already exists to avoid duplication
+      const existing = db.getFirstSync<{ id: number }>('SELECT id FROM orders WHERE order_number = ?', [order_number]);
+      if (!existing) {
+        db.runSync(
+          `INSERT INTO orders (order_number, customer_name, table_no, subtotal, tax_rate, tax_amount, discount, grand_total, payment_method, notes, cash_amount, upi_amount, is_split_payment, status, synced)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            order_number, takeOrder.customer_name, takeOrder.table_no, takeOrder.subtotal,
+            takeOrder.tax_rate, takeOrder.tax_amount, takeOrder.discount, takeOrder.grand_total,
+            takeOrder.payment_method, takeOrder.notes, takeOrder.cash_amount, takeOrder.upi_amount,
+            takeOrder.is_split_payment, 'completed', 1
+          ]
+        );
+        const newOrderId = db.getFirstSync<{ id: number }>('SELECT id FROM orders WHERE order_number = ?', [order_number])?.id;
+        if (newOrderId && takeOrder.items) {
+          for (const item of takeOrder.items) {
+            db.runSync(
+              `INSERT INTO order_items (order_id, item_id, item_code, item_name, rate, quantity, subtotal)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [newOrderId, item.item_id, item.item_code, item.item_name, item.rate, item.quantity, item.subtotal]
+            );
+          }
+        }
+      }
+    }
   } else {
     db.runSync('UPDATE take_orders SET status = ? WHERE id = ?', [status, id]);
   }
