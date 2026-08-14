@@ -101,7 +101,8 @@ export const getTakeOrderById = (id: number): TakeOrder | null => {
 export const updateTakeOrderStatus = (id: number, status: 'saved' | 'cancelled'): void => {
   const db = getDB();
   if (status === 'saved') {
-    db.runSync('UPDATE take_orders SET status = ?, saved_at = datetime("now","localtime") WHERE id = ?', [status, id]);
+    // Set synced = 0 so backgroundSync sends it via takeOrdersPayload (and it appears as an ORDER on backend)
+    db.runSync('UPDATE take_orders SET status = ?, saved_at = datetime("now","localtime"), synced = 0 WHERE id = ?', [status, id]);
 
     // Insert into orders table to show in local sales reports
     const takeOrder = getTakeOrderById(id);
@@ -117,7 +118,7 @@ export const updateTakeOrderStatus = (id: number, status: 'saved' | 'cancelled')
             order_number, takeOrder.customer_name, takeOrder.table_no, takeOrder.subtotal,
             takeOrder.tax_rate, takeOrder.tax_amount, takeOrder.discount, takeOrder.grand_total,
             takeOrder.payment_method, takeOrder.notes, takeOrder.cash_amount, takeOrder.upi_amount,
-            takeOrder.is_split_payment, 'completed', 1
+            takeOrder.is_split_payment, 'completed', 1 // synced = 1 so it DOES NOT sync as a sale
           ]
         );
         const newOrderId = db.getFirstSync<{ id: number }>('SELECT id FROM orders WHERE order_number = ?', [order_number])?.id;

@@ -753,8 +753,16 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
 
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       const response = await GoogleSignin.signIn();
-      if (response.data?.user) {
-        const u = { email: response.data.user.email ?? '', name: response.data.user.name ?? null, photo: response.data.user.photo ?? null, id: response.data.user.id ?? '' };
+      console.log('[GoogleSignIn] response:', JSON.stringify(response));
+      const userData = response.data?.user ?? (response as any).user;
+      if (userData) {
+        const u = {
+          email: userData.email ?? '',
+          name: userData.name ?? null,
+          photo: userData.photo ?? null,
+          id: userData.id ?? '',
+        };
+        console.log('[GoogleSignIn] user:', JSON.stringify(u));
         setGoogleUser(u);
         return u;
       }
@@ -792,7 +800,49 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
     }
   };
 
+  // --- Check email registration via Shop API ---
+  const checkShopEmailViaAPI = async (email: string): Promise<{ found: boolean; expired: boolean; remainingDays: number | null }> => {
+    try {
+      const response = await fetch('https://ml.imcbs.com/api/shops/', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) return { found: false, expired: false, remainingDays: null };
+      const shops: any[] = await response.json();
+      const match = shops.find((s: any) => s.email?.toLowerCase() === email.toLowerCase());
+      if (!match) return { found: false, expired: false, remainingDays: null };
+      const created = new Date(match.created_date);
+      const now = new Date();
+      const daysSinceCreated = Math.floor((now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysSinceCreated >= 12) return { found: true, expired: true, remainingDays: null };
+      const remainingDays = 12 - daysSinceCreated;
+      return { found: true, expired: false, remainingDays };
+    } catch (error) {
+      console.error('Error checking shop email via API:', error);
+      return { found: false, expired: false, remainingDays: null };
+    }
+  };
+
+  // --- Register shop via API ---
+  const registerShopViaAPI = async (shopName: string, phone: string, email: string): Promise<any> => {
+    const response = await fetch('https://ml.imcbs.com/api/shops/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shop_name: shopName, phone, email }),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Failed to register shop');
+    }
+    return await response.json();
+  };
+
   const handleActivateDemo = async () => {
+    if (!googleUser?.email?.trim()) {
+      Alert.alert("Email Required", "Please authenticate your email using the 'Change Email' button before starting the demo.");
+      return;
+    }
+
     if (!demoShopName.trim() || !demoPhone.trim()) {
       Alert.alert("Required", "Please enter both Shop Name and Phone Number");
       return;
@@ -815,54 +865,54 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
 
     setLoading(true);
     try {
-      // 1. Check for existing demo
-      const existingExpiry = await AsyncStorage.getItem("demoExpiresAt");
+      // 1. Check the server API for this Google-authenticated email
+      console.log("🔍 Checking shop API for email:", googleUser.email);
+      const apiCheck = await checkShopEmailViaAPI(googleUser.email);
+
+      if (apiCheck.found && apiCheck.expired) {
+        Alert.alert(
+          "Demo Expired",
+          "This email's 12-day demo has expired or was already used. Please purchase a full license."
+        );
+        setLoading(false);
+        return;
+      }
+
       let expiry: Date;
-
-      if (existingExpiry) {
-        expiry = new Date(existingExpiry);
-        if (expiry.getTime() < Date.now()) {
-          Alert.alert("Demo Expired", "Your 5-day demo has expired. Please activate a full license.");
-          setLoading(false);
-          return;
-        }
-        console.log("🔄 Continuing existing demo until:", expiry.toISOString());
-      } else {
-        // Create new demo expiry
-        expiry = new Date();
-        expiry.setDate(expiry.getDate() + 5);
-        console.log("🆕 Starting new 5-day demo...");
-      }
-
-      // 2. Send WhatsApp Message (Only if new demo)
-      if (!existingExpiry) {
-        const fullPhone = `${countryCode} ${demoPhone}`;
-        const MSG = `melonlite enquiry \nshopname : ${demoShopName}\nphone number : ${fullPhone}`;
-        const encodedMsg = encodeURIComponent(MSG);
-        
-        console.log("📤 Sending Demo Enquiry to WhatsApp recipients...");
-        const recipients = ["9072791379", "9946545535"];
-        
-        await Promise.all(recipients.map(recipient => {
-          const url = `https://app.dxing.in/api/send/whatsapp?secret=4d8911f61a3eff1123ba4b11408f66697ab8bdf5&account=1778132749812b4ba287f5ee0bc9d43bbf5bbe87fb69fc270dc7c77&recipient=${recipient}&type=text&message=${encodedMsg}&priority=1`;
-          return fetch(url).catch(err => console.error(`Failed to send to ${recipient}:`, err));
-        }));
-      }
-
-      // 3. Setup Demo Data using new clean keys
       const demoKey = "DEMO-" + Math.random().toString(36).substring(7).toUpperCase();
-      const demoClientId = "DEMO_" + Date.now();
+      let demoClientId: string;
 
+      if (apiCheck.found && !apiCheck.expired) {
+        // Reactivate — compute expiry from remaining days returned by API check
+        expiry = new Date();
+        expiry.setDate(expiry.getDate() + (apiCheck.remainingDays ?? 1));
+        demoClientId = "DEMO_" + Date.now();
+        console.log("🔄 Reactivating existing demo, remaining days:", apiCheck.remainingDays);
+      } else {
+        // New registration — POST to API
+        const fullPhone = `${countryCode}${numericPhone}`;
+        console.log("📤 Registering new shop via API...");
+        const shopData = await registerShopViaAPI(demoShopName, fullPhone, googleUser.email);
+        console.log("✅ Shop registered:", shopData);
+
+        // Compute expiry from API created_date + 12 days
+        const created = shopData.created_date ? new Date(shopData.created_date) : new Date();
+        expiry = new Date(created.getTime());
+        expiry.setDate(expiry.getDate() + 12);
+        demoClientId = "DEMO_" + (shopData.id || Date.now());
+      }
+
+      // 2. Setup Demo Data
       await AsyncStorage.setItem("licenseActivated", "true");
-      await AsyncStorage.setItem("licenseKey", demoKey);          // Shared routing key
-      await AsyncStorage.setItem("license_type", "demo");         // Clean type flag
+      await AsyncStorage.setItem("licenseKey", demoKey);
+      await AsyncStorage.setItem("license_type", "demo");
       await AsyncStorage.setItem("demo_key", demoKey);
       await AsyncStorage.setItem("demo_expiry", expiry.toISOString());
       await AsyncStorage.setItem("demo_company", demoShopName);
       await AsyncStorage.setItem("demo_client_id", demoClientId);
-      await AsyncStorage.setItem("demoUsed", "true");             // Prevent re-use
+      await AsyncStorage.setItem("demoUsed", "true");
 
-      // Save the Google email as used (so same email cannot start another demo)
+      // Save the Google email as used (local fallback)
       if (googleUser?.email) {
         await markEmailAsUsed(googleUser.email);
         await AsyncStorage.setItem('demo_google_email', googleUser.email);
@@ -872,7 +922,7 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
       await AsyncStorage.multiRemove(["real_license_key", "real_customer_name", "real_client_id", "real_expiry", "real_status"]);
 
       Alert.alert(
-        existingExpiry ? "Demo Restored" : "Demo Activated",
+        apiCheck.found ? "Demo Restored" : "Demo Activated",
         `Welcome! Your demo expires on ${expiry.toLocaleDateString()}.`,
         [{ text: "Start Using App", onPress: () => router.replace('/(tabs)') }]
       );
@@ -1012,7 +1062,7 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
                   <Text style={styles.demoLinkText}>
                     {demoRemainingDays !== null 
                       ? `Continue Demo (${demoRemainingDays} days left)` 
-                      : 'Try Demo for 5 Days'}
+                      : 'Try 12-Day Demo'}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -1030,7 +1080,38 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
                 placeholderTextColor="#666"
                 editable={!loading}
               />
-              
+
+              <Text style={[styles.inputLabel, { marginTop: 20 }]}>Email</Text>
+              <View style={styles.emailFieldContainer}>
+                <View style={styles.emailFieldInner}>
+                  <Text style={styles.emailFieldText} numberOfLines={1}>
+                    {googleUser?.email ? googleUser.email : '(no email — tap Change Email)'}
+                  </Text>
+                  <View style={styles.emailVerifiedBadge}>
+                    <Text style={styles.emailVerifiedText}>✓ Verified</Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={styles.changeEmailBtn}
+                  disabled={loading || googleSigningIn}
+                  onPress={async () => {
+                    try {
+                      await GoogleSignin.signOut();
+                    } catch (_) {}
+                    setGoogleSigningIn(true);
+                    const user = await signInWithGoogle();
+                    setGoogleSigningIn(false);
+                    // googleUser state is updated inside signInWithGoogle already
+                  }}
+                >
+                  {googleSigningIn ? (
+                    <ActivityIndicator size="small" color="#FFD700" />
+                  ) : (
+                    <Text style={styles.changeEmailBtnText}>Change Email</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+
               <Text style={[styles.inputLabel, { marginTop: 20 }]}>Phone Number</Text>
               <View style={styles.phoneInputContainer}>
                 <TouchableOpacity 
@@ -1060,7 +1141,7 @@ export default function LicenseActivationScreen({ onActivationSuccess }: { onAct
               {loading ? (
                 <ActivityIndicator color="#0D0D0D" />
               ) : (
-                <Text style={styles.buttonText}>Start 5-Day Demo</Text>
+                <Text style={styles.buttonText}>Start Demo</Text>
               )}
             </TouchableOpacity>
 
@@ -1337,6 +1418,56 @@ const styles = StyleSheet.create({
   modalCloseText: {
     color: '#fff',
     fontSize: 16,
+    fontFamily: 'Poppins-SemiBold',
+  },
+  // ── Email field styles ──────────────────────────────────────────────────────
+  emailFieldContainer: {
+    gap: 8,
+  },
+  emailFieldInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 168, 83, 0.4)',
+  },
+  emailFieldText: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Poppins-Regular',
+  },
+  emailVerifiedBadge: {
+    backgroundColor: 'rgba(212, 168, 83, 0.15)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginLeft: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 168, 83, 0.4)',
+  },
+  emailVerifiedText: {
+    color: '#D4A853',
+    fontSize: 11,
+    fontFamily: 'Poppins-SemiBold',
+  },
+  changeEmailBtn: {
+    alignSelf: 'flex-end',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 215, 0, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 215, 0, 0.3)',
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  changeEmailBtnText: {
+    color: '#FFD700',
+    fontSize: 12,
     fontFamily: 'Poppins-SemiBold',
   },
 });
